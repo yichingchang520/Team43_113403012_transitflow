@@ -114,8 +114,8 @@ CREATE TABLE metro_schedules (
     travel_time_from_origin JSONB    NOT NULL,  
     first_train_time    TIME         NOT NULL,
     last_train_time     TIME         NOT NULL,
-    base_fare_usd       NUMERIC(6,2) NOT NULL,
-    per_stop_rate_usd   NUMERIC(6,2) NOT NULL,
+    base_fare_usd       NUMERIC(6,2) NOT NULL CHECK (base_fare_usd >= 0),
+    per_stop_rate_usd   NUMERIC(6,2) NOT NULL CHECK (per_stop_rate_usd >= 0),
     frequency_min       INT          NOT NULL
 );
 
@@ -128,7 +128,7 @@ CREATE TABLE metro_schedule_days (
 CREATE TABLE national_rail_schedules (
     schedule_id             VARCHAR(20)  PRIMARY KEY,
     line                    VARCHAR(10)  NOT NULL,
-    service_type            VARCHAR(10)  NOT NULL,  
+    service_type            VARCHAR(10)  NOT NULL CHECK (service_type IN ('normal', 'express')),
     direction               VARCHAR(20)  NOT NULL,
     origin_station_id       VARCHAR(10)  NOT NULL REFERENCES national_rail_stations(station_id),
     destination_station_id  VARCHAR(10)  NOT NULL REFERENCES national_rail_stations(station_id),
@@ -161,7 +161,7 @@ CREATE TABLE coaches (
     coach_id    SERIAL       PRIMARY KEY,
     layout_id   VARCHAR(10)  NOT NULL REFERENCES seat_layouts(layout_id),
     coach       VARCHAR(5)   NOT NULL,   
-    fare_class  VARCHAR(10)  NOT NULL,   
+    fare_class  VARCHAR(10)  NOT NULL CHECK (fare_class IN ('standard', 'first')),
     UNIQUE (layout_id, coach)
 );
 
@@ -183,13 +183,13 @@ CREATE TABLE bookings (
     destination_station_id  VARCHAR(10)  NOT NULL REFERENCES national_rail_stations(station_id),
     travel_date             DATE         NOT NULL,
     departure_time          TIME         NOT NULL,
-    ticket_type             VARCHAR(10)  NOT NULL,  
-    fare_class              VARCHAR(10)  NOT NULL,  
+    ticket_type             VARCHAR(10)  NOT NULL CHECK (ticket_type IN ('single', 'return', 'season')),
+    fare_class              VARCHAR(10)  NOT NULL CHECK (fare_class IN ('standard', 'first')),
     coach                   VARCHAR(5)   NOT NULL,
     seat_id                 VARCHAR(10)  NOT NULL,
-    stops_travelled         INT          NOT NULL,
-    amount_usd              NUMERIC(8,2) NOT NULL,
-    status                  VARCHAR(20)  NOT NULL,  
+    stops_travelled         INT          NOT NULL CHECK (stops_travelled > 0),
+    amount_usd              NUMERIC(8,2) NOT NULL CHECK (amount_usd >= 0),
+    status                  VARCHAR(20)  NOT NULL CHECK (status IN ('confirmed', 'completed', 'cancelled')),
     booked_at               TIMESTAMPTZ  NOT NULL,
     travelled_at            TIMESTAMPTZ
 );
@@ -201,11 +201,11 @@ CREATE TABLE metro_trips (
     origin_station_id       VARCHAR(10)  NOT NULL REFERENCES metro_stations(station_id),
     destination_station_id  VARCHAR(10)  NOT NULL REFERENCES metro_stations(station_id),
     travel_date             DATE         NOT NULL,
-    ticket_type             VARCHAR(10)  NOT NULL,  
-    day_pass_ref            VARCHAR(10),            
-    stops_travelled         INT,                    
-    amount_usd              NUMERIC(8,2) NOT NULL,
-    status                  VARCHAR(20)  NOT NULL,  
+    ticket_type             VARCHAR(10)  NOT NULL CHECK (ticket_type IN ('single', 'day_pass')),
+    day_pass_ref            VARCHAR(10),
+    stops_travelled         INT          CHECK (stops_travelled > 0),
+    amount_usd              NUMERIC(8,2) NOT NULL CHECK (amount_usd >= 0),
+    status                  VARCHAR(20)  NOT NULL CHECK (status IN ('confirmed', 'completed', 'cancelled')),
     purchased_at            TIMESTAMPTZ,
     travelled_at            TIMESTAMPTZ
 );
@@ -213,9 +213,9 @@ CREATE TABLE metro_trips (
 CREATE TABLE payments (
     payment_id  VARCHAR(10)  PRIMARY KEY,
     booking_id  VARCHAR(10)  NOT NULL,   
-    amount_usd  NUMERIC(8,2) NOT NULL,
-    method      VARCHAR(20)  NOT NULL,   
-    status      VARCHAR(20)  NOT NULL,   
+    amount_usd  NUMERIC(8,2) NOT NULL CHECK (amount_usd >= 0),
+    method      VARCHAR(20)  NOT NULL CHECK (method IN ('credit_card', 'debit_card', 'ewallet')),
+    status      VARCHAR(20)  NOT NULL CHECK (status IN ('paid', 'pending', 'refunded', 'failed')),
     paid_at     TIMESTAMPTZ  NOT NULL
 );
 
@@ -235,6 +235,15 @@ CREATE INDEX idx_metro_trips_user     ON metro_trips(user_id);
 CREATE INDEX idx_metro_trips_date     ON metro_trips(travel_date);
 CREATE INDEX idx_payments_booking     ON payments(booking_id);
 CREATE INDEX idx_feedback_user        ON feedback(user_id);
+
+-- Prevent double booking: same train, same date, same seat cannot be booked twice
+CREATE UNIQUE INDEX idx_prevent_double_booking
+    ON bookings (schedule_id, travel_date, coach, seat_id)
+    WHERE status IN ('confirmed', 'completed');
+
+-- Prevent duplicate feedback per booking
+CREATE UNIQUE INDEX idx_feedback_unique_booking
+    ON feedback (booking_id);
 
 ```
 
