@@ -245,7 +245,7 @@ CREATE INDEX idx_feedback_user        ON feedback(user_id);
 
 Node labels:
 
-```
+```cypher
 MATCH (n) DETACH DELETE n;
 
 CREATE CONSTRAINT station_id_unique IF NOT EXISTS
@@ -390,7 +390,7 @@ CREATE (a)-[:CONNECTS_TO {line: "M1", travel_time_min: 2}]->(b);
 
 Relationship types:
 
-```
+```cypher
 MATCH (a:Station {station_id: "NR01"}), (b:Station {station_id: "NR02"})
 CREATE (a)-[:CONNECTS_TO {line: "NR1", travel_time_min: 12}]->(b);
 MATCH (a:Station {station_id: "NR01"}), (b:Station {station_id: "NR06"})
@@ -455,7 +455,7 @@ CREATE (a)-[:INTERCHANGE_WITH {walking_time_min: 5}]->(b);
 
 Key properties:
 
-```
+```cypher
 - TODO
 ```
 
