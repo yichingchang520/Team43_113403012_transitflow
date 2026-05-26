@@ -226,13 +226,13 @@ CREATE TABLE feedback (
     submitted_at    TIMESTAMPTZ  NOT NULL
 );
 
-CREATE INDEX idx_bookings_user       ON bookings(user_id);
-CREATE INDEX idx_bookings_schedule   ON bookings(schedule_id);
+CREATE INDEX idx_bookings_user        ON bookings(user_id);
+CREATE INDEX idx_bookings_schedule    ON bookings(schedule_id);
 CREATE INDEX idx_bookings_travel_date ON bookings(travel_date);
-CREATE INDEX idx_metro_trips_user    ON metro_trips(user_id);
-CREATE INDEX idx_metro_trips_date    ON metro_trips(travel_date);
-CREATE INDEX idx_payments_booking    ON payments(booking_id);
-CREATE INDEX idx_feedback_user       ON feedback(user_id);
+CREATE INDEX idx_metro_trips_user     ON metro_trips(user_id);
+CREATE INDEX idx_metro_trips_date     ON metro_trips(travel_date);
+CREATE INDEX idx_payments_booking     ON payments(booking_id);
+CREATE INDEX idx_feedback_user        ON feedback(user_id);
 
 ```
 
@@ -243,14 +243,219 @@ CREATE INDEX idx_feedback_user       ON feedback(user_id);
   relationship types.
   ============================================================ -->
 
-```
 Node labels:
-- TODO
+
+```
+MATCH (n) DETACH DELETE n;
+
+CREATE CONSTRAINT station_id_unique IF NOT EXISTS
+FOR (s:Station) REQUIRE s.station_id IS UNIQUE;
+
+CREATE (:Station:MetroStation {station_id: "MS01", name: "Central Square"});
+CREATE (:Station:MetroStation {station_id: "MS02", name: "Riverside"});
+CREATE (:Station:MetroStation {station_id: "MS03", name: "Northgate"});
+CREATE (:Station:MetroStation {station_id: "MS04", name: "Elm Park"});
+CREATE (:Station:MetroStation {station_id: "MS05", name: "Westfield"});
+CREATE (:Station:MetroStation {station_id: "MS06", name: "Harbour View"});
+CREATE (:Station:MetroStation {station_id: "MS07", name: "Old Town"});
+CREATE (:Station:MetroStation {station_id: "MS08", name: "University"});
+CREATE (:Station:MetroStation {station_id: "MS09", name: "Queensbridge"});
+CREATE (:Station:MetroStation {station_id: "MS10", name: "Parkside"});
+CREATE (:Station:MetroStation {station_id: "MS11", name: "Greenhill"});
+CREATE (:Station:MetroStation {station_id: "MS12", name: "Lakeshore"});
+CREATE (:Station:MetroStation {station_id: "MS13", name: "Clifton"});
+CREATE (:Station:MetroStation {station_id: "MS14", name: "Eastwick"});
+CREATE (:Station:MetroStation {station_id: "MS15", name: "Ferndale"});
+CREATE (:Station:MetroStation {station_id: "MS16", name: "Hilltop"});
+CREATE (:Station:MetroStation {station_id: "MS17", name: "Broadmoor"});
+CREATE (:Station:MetroStation {station_id: "MS18", name: "Sunnyvale"});
+CREATE (:Station:MetroStation {station_id: "MS19", name: "Redwood"});
+CREATE (:Station:MetroStation {station_id: "MS20", name: "Thornton"});
+
+CREATE (:Station:NationalRailStation {station_id: "NR01", name: "Central Station"});
+CREATE (:Station:NationalRailStation {station_id: "NR02", name: "Maplewood"});
+CREATE (:Station:NationalRailStation {station_id: "NR03", name: "Old Town Junction"});
+CREATE (:Station:NationalRailStation {station_id: "NR04", name: "Ashford"});
+CREATE (:Station:NationalRailStation {station_id: "NR05", name: "Stonehaven"});
+CREATE (:Station:NationalRailStation {station_id: "NR06", name: "Bridgeport"});
+CREATE (:Station:NationalRailStation {station_id: "NR07", name: "Ferndale Halt"});
+CREATE (:Station:NationalRailStation {station_id: "NR08", name: "Coalport"});
+CREATE (:Station:NationalRailStation {station_id: "NR09", name: "Dunmore"});
+CREATE (:Station:NationalRailStation {station_id: "NR10", name: "Langford End"});
+
+MATCH (a:Station {station_id: "MS01"}), (b:Station {station_id: "MS05"})
+CREATE (a)-[:CONNECTS_TO {line: "M1", travel_time_min: 3}]->(b);
+MATCH (a:Station {station_id: "MS01"}), (b:Station {station_id: "MS02"})
+CREATE (a)-[:CONNECTS_TO {line: "M1", travel_time_min: 3}]->(b);
+MATCH (a:Station {station_id: "MS01"}), (b:Station {station_id: "MS06"})
+CREATE (a)-[:CONNECTS_TO {line: "M2", travel_time_min: 3}]->(b);
+MATCH (a:Station {station_id: "MS01"}), (b:Station {station_id: "MS07"})
+CREATE (a)-[:CONNECTS_TO {line: "M2", travel_time_min: 2}]->(b);
+
+MATCH (a:Station {station_id: "MS02"}), (b:Station {station_id: "MS01"})
+CREATE (a)-[:CONNECTS_TO {line: "M1", travel_time_min: 3}]->(b);
+MATCH (a:Station {station_id: "MS02"}), (b:Station {station_id: "MS03"})
+CREATE (a)-[:CONNECTS_TO {line: "M1", travel_time_min: 2}]->(b);
+
+MATCH (a:Station {station_id: "MS03"}), (b:Station {station_id: "MS02"})
+CREATE (a)-[:CONNECTS_TO {line: "M1", travel_time_min: 2}]->(b);
+MATCH (a:Station {station_id: "MS03"}), (b:Station {station_id: "MS04"})
+CREATE (a)-[:CONNECTS_TO {line: "M1", travel_time_min: 4}]->(b);
+
+MATCH (a:Station {station_id: "MS04"}), (b:Station {station_id: "MS03"})
+CREATE (a)-[:CONNECTS_TO {line: "M1", travel_time_min: 4}]->(b);
+MATCH (a:Station {station_id: "MS04"}), (b:Station {station_id: "MS17"})
+CREATE (a)-[:CONNECTS_TO {line: "M1", travel_time_min: 3}]->(b);
+MATCH (a:Station {station_id: "MS04"}), (b:Station {station_id: "MS12"})
+CREATE (a)-[:CONNECTS_TO {line: "M3", travel_time_min: 3}]->(b);
+
+MATCH (a:Station {station_id: "MS05"}), (b:Station {station_id: "MS20"})
+CREATE (a)-[:CONNECTS_TO {line: "M1", travel_time_min: 2}]->(b);
+MATCH (a:Station {station_id: "MS05"}), (b:Station {station_id: "MS01"})
+CREATE (a)-[:CONNECTS_TO {line: "M1", travel_time_min: 3}]->(b);
+
+MATCH (a:Station {station_id: "MS06"}), (b:Station {station_id: "MS01"})
+CREATE (a)-[:CONNECTS_TO {line: "M2", travel_time_min: 3}]->(b);
+
+MATCH (a:Station {station_id: "MS07"}), (b:Station {station_id: "MS01"})
+CREATE (a)-[:CONNECTS_TO {line: "M2", travel_time_min: 2}]->(b);
+MATCH (a:Station {station_id: "MS07"}), (b:Station {station_id: "MS18"})
+CREATE (a)-[:CONNECTS_TO {line: "M2", travel_time_min: 2}]->(b);
+
+MATCH (a:Station {station_id: "MS08"}), (b:Station {station_id: "MS18"})
+CREATE (a)-[:CONNECTS_TO {line: "M2", travel_time_min: 4}]->(b);
+MATCH (a:Station {station_id: "MS08"}), (b:Station {station_id: "MS09"})
+CREATE (a)-[:CONNECTS_TO {line: "M2", travel_time_min: 3}]->(b);
+MATCH (a:Station {station_id: "MS08"}), (b:Station {station_id: "MS17"})
+CREATE (a)-[:CONNECTS_TO {line: "M4", travel_time_min: 4}]->(b);
+MATCH (a:Station {station_id: "MS08"}), (b:Station {station_id: "MS12"})
+CREATE (a)-[:CONNECTS_TO {line: "M4", travel_time_min: 4}]->(b);
+
+MATCH (a:Station {station_id: "MS09"}), (b:Station {station_id: "MS08"})
+CREATE (a)-[:CONNECTS_TO {line: "M2", travel_time_min: 3}]->(b);
+
+MATCH (a:Station {station_id: "MS10"}), (b:Station {station_id: "MS11"})
+CREATE (a)-[:CONNECTS_TO {line: "M3", travel_time_min: 2}]->(b);
+MATCH (a:Station {station_id: "MS10"}), (b:Station {station_id: "MS12"})
+CREATE (a)-[:CONNECTS_TO {line: "M3", travel_time_min: 4}]->(b);
+
+MATCH (a:Station {station_id: "MS11"}), (b:Station {station_id: "MS10"})
+CREATE (a)-[:CONNECTS_TO {line: "M3", travel_time_min: 2}]->(b);
+MATCH (a:Station {station_id: "MS11"}), (b:Station {station_id: "MS19"})
+CREATE (a)-[:CONNECTS_TO {line: "M3", travel_time_min: 3}]->(b);
+
+MATCH (a:Station {station_id: "MS12"}), (b:Station {station_id: "MS04"})
+CREATE (a)-[:CONNECTS_TO {line: "M3", travel_time_min: 3}]->(b);
+MATCH (a:Station {station_id: "MS12"}), (b:Station {station_id: "MS10"})
+CREATE (a)-[:CONNECTS_TO {line: "M3", travel_time_min: 4}]->(b);
+MATCH (a:Station {station_id: "MS12"}), (b:Station {station_id: "MS08"})
+CREATE (a)-[:CONNECTS_TO {line: "M4", travel_time_min: 4}]->(b);
+MATCH (a:Station {station_id: "MS12"}), (b:Station {station_id: "MS14"})
+CREATE (a)-[:CONNECTS_TO {line: "M4", travel_time_min: 4}]->(b);
+
+MATCH (a:Station {station_id: "MS13"}), (b:Station {station_id: "MS19"})
+CREATE (a)-[:CONNECTS_TO {line: "M3", travel_time_min: 2}]->(b);
+
+MATCH (a:Station {station_id: "MS14"}), (b:Station {station_id: "MS12"})
+CREATE (a)-[:CONNECTS_TO {line: "M4", travel_time_min: 4}]->(b);
+MATCH (a:Station {station_id: "MS14"}), (b:Station {station_id: "MS15"})
+CREATE (a)-[:CONNECTS_TO {line: "M4", travel_time_min: 2}]->(b);
+
+MATCH (a:Station {station_id: "MS15"}), (b:Station {station_id: "MS14"})
+CREATE (a)-[:CONNECTS_TO {line: "M4", travel_time_min: 2}]->(b);
+MATCH (a:Station {station_id: "MS15"}), (b:Station {station_id: "MS16"})
+CREATE (a)-[:CONNECTS_TO {line: "M4", travel_time_min: 3}]->(b);
+
+MATCH (a:Station {station_id: "MS16"}), (b:Station {station_id: "MS15"})
+CREATE (a)-[:CONNECTS_TO {line: "M4", travel_time_min: 3}]->(b);
+
+MATCH (a:Station {station_id: "MS17"}), (b:Station {station_id: "MS04"})
+CREATE (a)-[:CONNECTS_TO {line: "M1", travel_time_min: 3}]->(b);
+MATCH (a:Station {station_id: "MS17"}), (b:Station {station_id: "MS08"})
+CREATE (a)-[:CONNECTS_TO {line: "M4", travel_time_min: 4}]->(b);
+
+MATCH (a:Station {station_id: "MS18"}), (b:Station {station_id: "MS07"})
+CREATE (a)-[:CONNECTS_TO {line: "M2", travel_time_min: 2}]->(b);
+MATCH (a:Station {station_id: "MS18"}), (b:Station {station_id: "MS08"})
+CREATE (a)-[:CONNECTS_TO {line: "M2", travel_time_min: 4}]->(b);
+
+MATCH (a:Station {station_id: "MS19"}), (b:Station {station_id: "MS13"})
+CREATE (a)-[:CONNECTS_TO {line: "M3", travel_time_min: 2}]->(b);
+MATCH (a:Station {station_id: "MS19"}), (b:Station {station_id: "MS11"})
+CREATE (a)-[:CONNECTS_TO {line: "M3", travel_time_min: 3}]->(b);
+
+MATCH (a:Station {station_id: "MS20"}), (b:Station {station_id: "MS05"})
+CREATE (a)-[:CONNECTS_TO {line: "M1", travel_time_min: 2}]->(b);
+```
 
 Relationship types:
-- TODO
+
+```
+MATCH (a:Station {station_id: "NR01"}), (b:Station {station_id: "NR02"})
+CREATE (a)-[:CONNECTS_TO {line: "NR1", travel_time_min: 12}]->(b);
+MATCH (a:Station {station_id: "NR01"}), (b:Station {station_id: "NR06"})
+CREATE (a)-[:CONNECTS_TO {line: "NR2", travel_time_min: 14}]->(b);
+
+MATCH (a:Station {station_id: "NR02"}), (b:Station {station_id: "NR01"})
+CREATE (a)-[:CONNECTS_TO {line: "NR1", travel_time_min: 12}]->(b);
+MATCH (a:Station {station_id: "NR02"}), (b:Station {station_id: "NR03"})
+CREATE (a)-[:CONNECTS_TO {line: "NR1", travel_time_min: 18}]->(b);
+
+MATCH (a:Station {station_id: "NR03"}), (b:Station {station_id: "NR02"})
+CREATE (a)-[:CONNECTS_TO {line: "NR1", travel_time_min: 18}]->(b);
+MATCH (a:Station {station_id: "NR03"}), (b:Station {station_id: "NR04"})
+CREATE (a)-[:CONNECTS_TO {line: "NR1", travel_time_min: 15}]->(b);
+
+MATCH (a:Station {station_id: "NR04"}), (b:Station {station_id: "NR03"})
+CREATE (a)-[:CONNECTS_TO {line: "NR1", travel_time_min: 15}]->(b);
+MATCH (a:Station {station_id: "NR04"}), (b:Station {station_id: "NR05"})
+CREATE (a)-[:CONNECTS_TO {line: "NR1", travel_time_min: 20}]->(b);
+
+MATCH (a:Station {station_id: "NR05"}), (b:Station {station_id: "NR04"})
+CREATE (a)-[:CONNECTS_TO {line: "NR1", travel_time_min: 20}]->(b);
+
+MATCH (a:Station {station_id: "NR06"}), (b:Station {station_id: "NR01"})
+CREATE (a)-[:CONNECTS_TO {line: "NR2", travel_time_min: 14}]->(b);
+MATCH (a:Station {station_id: "NR06"}), (b:Station {station_id: "NR07"})
+CREATE (a)-[:CONNECTS_TO {line: "NR2", travel_time_min: 16}]->(b);
+
+MATCH (a:Station {station_id: "NR07"}), (b:Station {station_id: "NR06"})
+CREATE (a)-[:CONNECTS_TO {line: "NR2", travel_time_min: 16}]->(b);
+MATCH (a:Station {station_id: "NR07"}), (b:Station {station_id: "NR08"})
+CREATE (a)-[:CONNECTS_TO {line: "NR2", travel_time_min: 22}]->(b);
+
+MATCH (a:Station {station_id: "NR08"}), (b:Station {station_id: "NR07"})
+CREATE (a)-[:CONNECTS_TO {line: "NR2", travel_time_min: 22}]->(b);
+MATCH (a:Station {station_id: "NR08"}), (b:Station {station_id: "NR09"})
+CREATE (a)-[:CONNECTS_TO {line: "NR2", travel_time_min: 21}]->(b);
+
+MATCH (a:Station {station_id: "NR09"}), (b:Station {station_id: "NR08"})
+CREATE (a)-[:CONNECTS_TO {line: "NR2", travel_time_min: 21}]->(b);
+MATCH (a:Station {station_id: "NR09"}), (b:Station {station_id: "NR10"})
+CREATE (a)-[:CONNECTS_TO {line: "NR2", travel_time_min: 19}]->(b);
+
+MATCH (a:Station {station_id: "NR10"}), (b:Station {station_id: "NR09"})
+CREATE (a)-[:CONNECTS_TO {line: "NR2", travel_time_min: 19}]->(b);
+
+MATCH (a:Station {station_id: "MS01"}), (b:Station {station_id: "NR01"})
+CREATE (a)-[:INTERCHANGE_WITH {walking_time_min: 5}]->(b);
+MATCH (a:Station {station_id: "NR01"}), (b:Station {station_id: "MS01"})
+CREATE (a)-[:INTERCHANGE_WITH {walking_time_min: 5}]->(b);
+
+MATCH (a:Station {station_id: "MS07"}), (b:Station {station_id: "NR03"})
+CREATE (a)-[:INTERCHANGE_WITH {walking_time_min: 5}]->(b);
+MATCH (a:Station {station_id: "NR03"}), (b:Station {station_id: "MS07"})
+CREATE (a)-[:INTERCHANGE_WITH {walking_time_min: 5}]->(b);
+
+MATCH (a:Station {station_id: "MS15"}), (b:Station {station_id: "NR07"})
+CREATE (a)-[:INTERCHANGE_WITH {walking_time_min: 5}]->(b);
+MATCH (a:Station {station_id: "NR07"}), (b:Station {station_id: "MS15"})
+CREATE (a)-[:INTERCHANGE_WITH {walking_time_min: 5}]->(b);
+```
 
 Key properties:
+
+```
 - TODO
 ```
 
