@@ -53,7 +53,9 @@ TransitFlow is a Python-based AI chat assistant for a fictional transit operator
 ```sql
 CREATE TABLE users (
     user_id         VARCHAR(10)  PRIMARY KEY,
-    full_name       VARCHAR(100) NOT NULL,
+    first_name      VARCHAR(50)  NOT NULL,
+    surname         VARCHAR(50)  NOT NULL,
+    full_name       VARCHAR(100) GENERATED ALWAYS AS (first_name || ' ' || surname) STORED,
     email           VARCHAR(100) NOT NULL UNIQUE,
     phone           VARCHAR(20),
     date_of_birth   DATE,
@@ -238,225 +240,62 @@ CREATE INDEX idx_feedback_user        ON feedback(user_id);
 
 ## Agreed Graph Schema
 
-<!-- ============================================================
-  FILL THIS IN after your team agrees on Neo4j node labels and
-  relationship types.
-  ============================================================ -->
+### Node Labels
 
-Node labels:
+Every station node carries **two labels**: a shared `:Station` label (for cross-network queries) plus a network-specific label.
 
-```cypher
-MATCH (n) DETACH DELETE n;
+| Label | ID prefix | Properties |
+|---|---|---|
+| `:Station:MetroStation` | MS01–MS20 | `station_id`, `name` |
+| `:Station:NationalRailStation` | NR01–NR10 | `station_id`, `name` |
 
-CREATE CONSTRAINT station_id_unique IF NOT EXISTS
-FOR (s:Station) REQUIRE s.station_id IS UNIQUE;
+Constraint: `station_id` is unique across all `:Station` nodes.
 
-CREATE (:Station:MetroStation {station_id: "MS01", name: "Central Square"});
-CREATE (:Station:MetroStation {station_id: "MS02", name: "Riverside"});
-CREATE (:Station:MetroStation {station_id: "MS03", name: "Northgate"});
-CREATE (:Station:MetroStation {station_id: "MS04", name: "Elm Park"});
-CREATE (:Station:MetroStation {station_id: "MS05", name: "Westfield"});
-CREATE (:Station:MetroStation {station_id: "MS06", name: "Harbour View"});
-CREATE (:Station:MetroStation {station_id: "MS07", name: "Old Town"});
-CREATE (:Station:MetroStation {station_id: "MS08", name: "University"});
-CREATE (:Station:MetroStation {station_id: "MS09", name: "Queensbridge"});
-CREATE (:Station:MetroStation {station_id: "MS10", name: "Parkside"});
-CREATE (:Station:MetroStation {station_id: "MS11", name: "Greenhill"});
-CREATE (:Station:MetroStation {station_id: "MS12", name: "Lakeshore"});
-CREATE (:Station:MetroStation {station_id: "MS13", name: "Clifton"});
-CREATE (:Station:MetroStation {station_id: "MS14", name: "Eastwick"});
-CREATE (:Station:MetroStation {station_id: "MS15", name: "Ferndale"});
-CREATE (:Station:MetroStation {station_id: "MS16", name: "Hilltop"});
-CREATE (:Station:MetroStation {station_id: "MS17", name: "Broadmoor"});
-CREATE (:Station:MetroStation {station_id: "MS18", name: "Sunnyvale"});
-CREATE (:Station:MetroStation {station_id: "MS19", name: "Redwood"});
-CREATE (:Station:MetroStation {station_id: "MS20", name: "Thornton"});
+### Relationship Types
 
-CREATE (:Station:NationalRailStation {station_id: "NR01", name: "Central Station"});
-CREATE (:Station:NationalRailStation {station_id: "NR02", name: "Maplewood"});
-CREATE (:Station:NationalRailStation {station_id: "NR03", name: "Old Town Junction"});
-CREATE (:Station:NationalRailStation {station_id: "NR04", name: "Ashford"});
-CREATE (:Station:NationalRailStation {station_id: "NR05", name: "Stonehaven"});
-CREATE (:Station:NationalRailStation {station_id: "NR06", name: "Bridgeport"});
-CREATE (:Station:NationalRailStation {station_id: "NR07", name: "Ferndale Halt"});
-CREATE (:Station:NationalRailStation {station_id: "NR08", name: "Coalport"});
-CREATE (:Station:NationalRailStation {station_id: "NR09", name: "Dunmore"});
-CREATE (:Station:NationalRailStation {station_id: "NR10", name: "Langford End"});
+Three distinct relationship types are used — one per connection category. Do **not** collapse them into a single generic type; keeping them separate allows Dijkstra and path queries to target only metro, only rail, or both.
 
-MATCH (a:Station {station_id: "MS01"}), (b:Station {station_id: "MS05"})
-CREATE (a)-[:CONNECTS_TO {line: "M1", travel_time_min: 3}]->(b);
-MATCH (a:Station {station_id: "MS01"}), (b:Station {station_id: "MS02"})
-CREATE (a)-[:CONNECTS_TO {line: "M1", travel_time_min: 3}]->(b);
-MATCH (a:Station {station_id: "MS01"}), (b:Station {station_id: "MS06"})
-CREATE (a)-[:CONNECTS_TO {line: "M2", travel_time_min: 3}]->(b);
-MATCH (a:Station {station_id: "MS01"}), (b:Station {station_id: "MS07"})
-CREATE (a)-[:CONNECTS_TO {line: "M2", travel_time_min: 2}]->(b);
+| Relationship | Direction | Used between | Properties |
+|---|---|---|---|
+| `METRO_LINK` | directed (both ways) | MetroStation → MetroStation | `line` (e.g. "M1"), `travel_time_min` |
+| `RAIL_LINK` | directed (both ways) | NationalRailStation → NationalRailStation | `line` (e.g. "NR1"), `travel_time_min` |
+| `INTERCHANGE_TO` | directed (both ways) | MetroStation ↔ NationalRailStation | `walking_time_min` |
 
-MATCH (a:Station {station_id: "MS02"}), (b:Station {station_id: "MS01"})
-CREATE (a)-[:CONNECTS_TO {line: "M1", travel_time_min: 3}]->(b);
-MATCH (a:Station {station_id: "MS02"}), (b:Station {station_id: "MS03"})
-CREATE (a)-[:CONNECTS_TO {line: "M1", travel_time_min: 2}]->(b);
+All links are **bidirectional** (two separate directed edges, one each way).
 
-MATCH (a:Station {station_id: "MS03"}), (b:Station {station_id: "MS02"})
-CREATE (a)-[:CONNECTS_TO {line: "M1", travel_time_min: 2}]->(b);
-MATCH (a:Station {station_id: "MS03"}), (b:Station {station_id: "MS04"})
-CREATE (a)-[:CONNECTS_TO {line: "M1", travel_time_min: 4}]->(b);
+### Network Summary
 
-MATCH (a:Station {station_id: "MS04"}), (b:Station {station_id: "MS03"})
-CREATE (a)-[:CONNECTS_TO {line: "M1", travel_time_min: 4}]->(b);
-MATCH (a:Station {station_id: "MS04"}), (b:Station {station_id: "MS17"})
-CREATE (a)-[:CONNECTS_TO {line: "M1", travel_time_min: 3}]->(b);
-MATCH (a:Station {station_id: "MS04"}), (b:Station {station_id: "MS12"})
-CREATE (a)-[:CONNECTS_TO {line: "M3", travel_time_min: 3}]->(b);
+- **Metro lines**: M1, M2, M3, M4 — 20 stations (MS01–MS20)
+- **National Rail lines**: NR1, NR2 — 10 stations (NR01–NR10)
+- **Interchange points** (metro ↔ national rail, walking_time_min = 5):
+  - MS01 (Central Square) ↔ NR01 (Central Station)
+  - MS07 (Old Town) ↔ NR03 (Old Town Junction)
+  - MS15 (Ferndale) ↔ NR07 (Ferndale Halt)
 
-MATCH (a:Station {station_id: "MS05"}), (b:Station {station_id: "MS20"})
-CREATE (a)-[:CONNECTS_TO {line: "M1", travel_time_min: 2}]->(b);
-MATCH (a:Station {station_id: "MS05"}), (b:Station {station_id: "MS01"})
-CREATE (a)-[:CONNECTS_TO {line: "M1", travel_time_min: 3}]->(b);
+### Important Rules for AI Code Generation
 
-MATCH (a:Station {station_id: "MS06"}), (b:Station {station_id: "MS01"})
-CREATE (a)-[:CONNECTS_TO {line: "M2", travel_time_min: 3}]->(b);
+- Use `:Station` label (not `:MetroStation` or `:NationalRailStation`) when the query should work across both networks
+- Use `$param` syntax for all parameters — never string-format values into Cypher
+- `METRO_LINK` and `RAIL_LINK` are directional, but tracks are bidirectional — both directions exist as separate relationships in the graph
+- `INTERCHANGE_TO` also exists in both directions
+- `station_id` values in Neo4j match exactly the `station_id` values in PostgreSQL (e.g. `"MS01"` in Neo4j = `"MS01"` in the `metro_stations` table)
+- `network="auto"` means infer from station ID prefix — `MS` prefix → metro (use `METRO_LINK`), `NR` prefix → rail (use `RAIL_LINK`); if origin and destination are on different networks, use all three relationship types (`METRO_LINK|RAIL_LINK|INTERCHANGE_TO`)
 
-MATCH (a:Station {station_id: "MS07"}), (b:Station {station_id: "MS01"})
-CREATE (a)-[:CONNECTS_TO {line: "M2", travel_time_min: 2}]->(b);
-MATCH (a:Station {station_id: "MS07"}), (b:Station {station_id: "MS18"})
-CREATE (a)-[:CONNECTS_TO {line: "M2", travel_time_min: 2}]->(b);
-
-MATCH (a:Station {station_id: "MS08"}), (b:Station {station_id: "MS18"})
-CREATE (a)-[:CONNECTS_TO {line: "M2", travel_time_min: 4}]->(b);
-MATCH (a:Station {station_id: "MS08"}), (b:Station {station_id: "MS09"})
-CREATE (a)-[:CONNECTS_TO {line: "M2", travel_time_min: 3}]->(b);
-MATCH (a:Station {station_id: "MS08"}), (b:Station {station_id: "MS17"})
-CREATE (a)-[:CONNECTS_TO {line: "M4", travel_time_min: 4}]->(b);
-MATCH (a:Station {station_id: "MS08"}), (b:Station {station_id: "MS12"})
-CREATE (a)-[:CONNECTS_TO {line: "M4", travel_time_min: 4}]->(b);
-
-MATCH (a:Station {station_id: "MS09"}), (b:Station {station_id: "MS08"})
-CREATE (a)-[:CONNECTS_TO {line: "M2", travel_time_min: 3}]->(b);
-
-MATCH (a:Station {station_id: "MS10"}), (b:Station {station_id: "MS11"})
-CREATE (a)-[:CONNECTS_TO {line: "M3", travel_time_min: 2}]->(b);
-MATCH (a:Station {station_id: "MS10"}), (b:Station {station_id: "MS12"})
-CREATE (a)-[:CONNECTS_TO {line: "M3", travel_time_min: 4}]->(b);
-
-MATCH (a:Station {station_id: "MS11"}), (b:Station {station_id: "MS10"})
-CREATE (a)-[:CONNECTS_TO {line: "M3", travel_time_min: 2}]->(b);
-MATCH (a:Station {station_id: "MS11"}), (b:Station {station_id: "MS19"})
-CREATE (a)-[:CONNECTS_TO {line: "M3", travel_time_min: 3}]->(b);
-
-MATCH (a:Station {station_id: "MS12"}), (b:Station {station_id: "MS04"})
-CREATE (a)-[:CONNECTS_TO {line: "M3", travel_time_min: 3}]->(b);
-MATCH (a:Station {station_id: "MS12"}), (b:Station {station_id: "MS10"})
-CREATE (a)-[:CONNECTS_TO {line: "M3", travel_time_min: 4}]->(b);
-MATCH (a:Station {station_id: "MS12"}), (b:Station {station_id: "MS08"})
-CREATE (a)-[:CONNECTS_TO {line: "M4", travel_time_min: 4}]->(b);
-MATCH (a:Station {station_id: "MS12"}), (b:Station {station_id: "MS14"})
-CREATE (a)-[:CONNECTS_TO {line: "M4", travel_time_min: 4}]->(b);
-
-MATCH (a:Station {station_id: "MS13"}), (b:Station {station_id: "MS19"})
-CREATE (a)-[:CONNECTS_TO {line: "M3", travel_time_min: 2}]->(b);
-
-MATCH (a:Station {station_id: "MS14"}), (b:Station {station_id: "MS12"})
-CREATE (a)-[:CONNECTS_TO {line: "M4", travel_time_min: 4}]->(b);
-MATCH (a:Station {station_id: "MS14"}), (b:Station {station_id: "MS15"})
-CREATE (a)-[:CONNECTS_TO {line: "M4", travel_time_min: 2}]->(b);
-
-MATCH (a:Station {station_id: "MS15"}), (b:Station {station_id: "MS14"})
-CREATE (a)-[:CONNECTS_TO {line: "M4", travel_time_min: 2}]->(b);
-MATCH (a:Station {station_id: "MS15"}), (b:Station {station_id: "MS16"})
-CREATE (a)-[:CONNECTS_TO {line: "M4", travel_time_min: 3}]->(b);
-
-MATCH (a:Station {station_id: "MS16"}), (b:Station {station_id: "MS15"})
-CREATE (a)-[:CONNECTS_TO {line: "M4", travel_time_min: 3}]->(b);
-
-MATCH (a:Station {station_id: "MS17"}), (b:Station {station_id: "MS04"})
-CREATE (a)-[:CONNECTS_TO {line: "M1", travel_time_min: 3}]->(b);
-MATCH (a:Station {station_id: "MS17"}), (b:Station {station_id: "MS08"})
-CREATE (a)-[:CONNECTS_TO {line: "M4", travel_time_min: 4}]->(b);
-
-MATCH (a:Station {station_id: "MS18"}), (b:Station {station_id: "MS07"})
-CREATE (a)-[:CONNECTS_TO {line: "M2", travel_time_min: 2}]->(b);
-MATCH (a:Station {station_id: "MS18"}), (b:Station {station_id: "MS08"})
-CREATE (a)-[:CONNECTS_TO {line: "M2", travel_time_min: 4}]->(b);
-
-MATCH (a:Station {station_id: "MS19"}), (b:Station {station_id: "MS13"})
-CREATE (a)-[:CONNECTS_TO {line: "M3", travel_time_min: 2}]->(b);
-MATCH (a:Station {station_id: "MS19"}), (b:Station {station_id: "MS11"})
-CREATE (a)-[:CONNECTS_TO {line: "M3", travel_time_min: 3}]->(b);
-
-MATCH (a:Station {station_id: "MS20"}), (b:Station {station_id: "MS05"})
-CREATE (a)-[:CONNECTS_TO {line: "M1", travel_time_min: 2}]->(b);
-```
-
-Relationship types:
+### Example Cypher Pattern
 
 ```cypher
-MATCH (a:Station {station_id: "NR01"}), (b:Station {station_id: "NR02"})
-CREATE (a)-[:CONNECTS_TO {line: "NR1", travel_time_min: 12}]->(b);
-MATCH (a:Station {station_id: "NR01"}), (b:Station {station_id: "NR06"})
-CREATE (a)-[:CONNECTS_TO {line: "NR2", travel_time_min: 14}]->(b);
+// Fastest metro route (Dijkstra by travel_time_min)
+MATCH (start:MetroStation {station_id: $origin}),
+      (end:MetroStation {station_id: $destination})
+CALL apoc.algo.dijkstra(start, end, 'METRO_LINK', 'travel_time_min')
+YIELD path, weight
+RETURN path, weight AS total_time_min
 
-MATCH (a:Station {station_id: "NR02"}), (b:Station {station_id: "NR01"})
-CREATE (a)-[:CONNECTS_TO {line: "NR1", travel_time_min: 12}]->(b);
-MATCH (a:Station {station_id: "NR02"}), (b:Station {station_id: "NR03"})
-CREATE (a)-[:CONNECTS_TO {line: "NR1", travel_time_min: 18}]->(b);
-
-MATCH (a:Station {station_id: "NR03"}), (b:Station {station_id: "NR02"})
-CREATE (a)-[:CONNECTS_TO {line: "NR1", travel_time_min: 18}]->(b);
-MATCH (a:Station {station_id: "NR03"}), (b:Station {station_id: "NR04"})
-CREATE (a)-[:CONNECTS_TO {line: "NR1", travel_time_min: 15}]->(b);
-
-MATCH (a:Station {station_id: "NR04"}), (b:Station {station_id: "NR03"})
-CREATE (a)-[:CONNECTS_TO {line: "NR1", travel_time_min: 15}]->(b);
-MATCH (a:Station {station_id: "NR04"}), (b:Station {station_id: "NR05"})
-CREATE (a)-[:CONNECTS_TO {line: "NR1", travel_time_min: 20}]->(b);
-
-MATCH (a:Station {station_id: "NR05"}), (b:Station {station_id: "NR04"})
-CREATE (a)-[:CONNECTS_TO {line: "NR1", travel_time_min: 20}]->(b);
-
-MATCH (a:Station {station_id: "NR06"}), (b:Station {station_id: "NR01"})
-CREATE (a)-[:CONNECTS_TO {line: "NR2", travel_time_min: 14}]->(b);
-MATCH (a:Station {station_id: "NR06"}), (b:Station {station_id: "NR07"})
-CREATE (a)-[:CONNECTS_TO {line: "NR2", travel_time_min: 16}]->(b);
-
-MATCH (a:Station {station_id: "NR07"}), (b:Station {station_id: "NR06"})
-CREATE (a)-[:CONNECTS_TO {line: "NR2", travel_time_min: 16}]->(b);
-MATCH (a:Station {station_id: "NR07"}), (b:Station {station_id: "NR08"})
-CREATE (a)-[:CONNECTS_TO {line: "NR2", travel_time_min: 22}]->(b);
-
-MATCH (a:Station {station_id: "NR08"}), (b:Station {station_id: "NR07"})
-CREATE (a)-[:CONNECTS_TO {line: "NR2", travel_time_min: 22}]->(b);
-MATCH (a:Station {station_id: "NR08"}), (b:Station {station_id: "NR09"})
-CREATE (a)-[:CONNECTS_TO {line: "NR2", travel_time_min: 21}]->(b);
-
-MATCH (a:Station {station_id: "NR09"}), (b:Station {station_id: "NR08"})
-CREATE (a)-[:CONNECTS_TO {line: "NR2", travel_time_min: 21}]->(b);
-MATCH (a:Station {station_id: "NR09"}), (b:Station {station_id: "NR10"})
-CREATE (a)-[:CONNECTS_TO {line: "NR2", travel_time_min: 19}]->(b);
-
-MATCH (a:Station {station_id: "NR10"}), (b:Station {station_id: "NR09"})
-CREATE (a)-[:CONNECTS_TO {line: "NR2", travel_time_min: 19}]->(b);
-
-MATCH (a:Station {station_id: "MS01"}), (b:Station {station_id: "NR01"})
-CREATE (a)-[:INTERCHANGE_WITH {walking_time_min: 5}]->(b);
-MATCH (a:Station {station_id: "NR01"}), (b:Station {station_id: "MS01"})
-CREATE (a)-[:INTERCHANGE_WITH {walking_time_min: 5}]->(b);
-
-MATCH (a:Station {station_id: "MS07"}), (b:Station {station_id: "NR03"})
-CREATE (a)-[:INTERCHANGE_WITH {walking_time_min: 5}]->(b);
-MATCH (a:Station {station_id: "NR03"}), (b:Station {station_id: "MS07"})
-CREATE (a)-[:INTERCHANGE_WITH {walking_time_min: 5}]->(b);
-
-MATCH (a:Station {station_id: "MS15"}), (b:Station {station_id: "NR07"})
-CREATE (a)-[:INTERCHANGE_WITH {walking_time_min: 5}]->(b);
-MATCH (a:Station {station_id: "NR07"}), (b:Station {station_id: "MS15"})
-CREATE (a)-[:INTERCHANGE_WITH {walking_time_min: 5}]->(b);
-```
-
-Key properties:
-
-```cypher
-- TODO
+// Cross-network path (metro → interchange → rail)
+MATCH path = shortestPath(
+  (a:Station {station_id: $origin})-[:METRO_LINK|RAIL_LINK|INTERCHANGE_TO*]-(b:Station {station_id: $destination})
+)
+RETURN path
 ```
 
 ## Function Signatures We Are Implementing
@@ -501,11 +340,20 @@ def query_station_connections(station_id: str) -> list[dict]: ...
 
 ## Team Decisions Log
 
-<!-- Add entries as you make decisions. Format: "Decision: X. Why: Y." -->
+### Relational Schema
 
-- [ ] Schema design: TODO — add your table/column decisions here
-- [ ] Graph schema: TODO — add your node label and relationship type decisions here
-- [ ] (example) Metro schedule stop ordering: using `jsonb_array_elements` approach — easier to debug than containment operators
+- **`stops_in_order` and `travel_time_from_origin` stored as JSONB.** Why: the stop list is an ordered array and the travel time map is a key-value dict — both are awkward to normalise into separate rows and are always read as a whole unit, so JSONB is simpler and sufficient.
+- **`payments.booking_id` has no foreign key constraint.** Why: the column is a polymorphic reference — it can point to either `bookings.booking_id` (national rail) or `metro_trips.trip_id` (metro). PostgreSQL does not support multi-table FK targets, so the constraint is intentionally omitted.
+- **`users` and `user_credentials` are separate tables.** Why: separating auth data (password, secret Q&A) from profile data means query functions that only need name/email don't expose credential columns.
+- **`bookings` table covers national rail only; `metro_trips` covers metro.** Why: the two journey types have different fields (seat assignment exists only on national rail; day pass exists only on metro), so merging them into one table would leave many nullable columns.
+- **National rail fare split into `std_*` and `first_*` columns.** Why: every national rail schedule has exactly two fare classes with fixed base + per-stop rates; flattening them avoids a separate `fare_classes` join table for a fixed two-row case.
+
+### Graph Schema
+
+- **Three relationship types: `METRO_LINK`, `RAIL_LINK`, `INTERCHANGE_TO`.** Why: keeping them separate lets Dijkstra and path queries target only metro, only rail, or both without filtering on a property. Using a single `CONNECTS_TO` would require `WHERE r.line STARTS WITH 'M'` everywhere.
+- **Every node carries two labels (`:Station:MetroStation` or `:Station:NationalRailStation`).** Why: the shared `:Station` label enables cross-network queries in a single pattern; the specific label enables network-scoped queries without relationship-type filtering.
+- **All links are bidirectional (two directed edges, one each way).** Why: the source JSON defines adjacency from both sides; storing both directions makes Dijkstra traversal straightforward without needing undirected relationship syntax.
+- **`walking_time_min = 5` for all interchange links.** Why: the source data does not specify walking time per interchange; 5 minutes is used as a uniform placeholder.
 
 ## Prompts That Worked
 
