@@ -1054,18 +1054,15 @@ def verify_secret_answer(email: str, answer: str) -> bool:
                 return False
 
 
-def update_password(email: str, new_password: str) -> tuple[bool, str]:
+def update_password(email: str, new_password: str) -> bool:
     """
     Update the password for a user.
 
-    Returns:
-        (True,  "")              on success
-        (False, error_message)   on failure (invalid length, email not found, etc.)
+    Returns True if the password was updated, False otherwise
+    (email not found or password fails length policy).
     """
-    if len(new_password) < _PW_MIN_LEN:
-        return False, f"Password must be at least {_PW_MIN_LEN} characters"
-    if len(new_password) > _PW_MAX_LEN:
-        return False, f"Password must be at most {_PW_MAX_LEN} characters"
+    if not (_PW_MIN_LEN <= len(new_password) <= _PW_MAX_LEN):
+        return False
 
     with _connect() as conn:
         with conn.cursor() as cur:
@@ -1078,9 +1075,7 @@ def update_password(email: str, new_password: str) -> tuple[bool, str]:
                 """,
                 (_ph.hash(new_password), email.strip().lower()),
             )
-            if cur.rowcount > 0:
-                return True, ""
-            return False, "No account found for that email address"
+            return cur.rowcount > 0
 
 
 # ── VECTOR / RAG QUERIES — do not modify ─────────────────────────────────────
