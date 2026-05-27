@@ -391,18 +391,32 @@ def query_station_connections(station_id: str) -> list[dict]: ...
 
 ### Relational Schema
 
-- **`stops_in_order` and `travel_time_from_origin` stored as JSONB.** Why: the stop list is an ordered array and the travel time map is a key-value dict — both are awkward to normalise into separate rows and are always read as a whole unit, so JSONB is simpler and sufficient.
-- **`payments.booking_id` has no foreign key constraint.** Why: the column is a polymorphic reference — it can point to either `bookings.booking_id` (national rail) or `metro_trips.trip_id` (metro). PostgreSQL does not support multi-table FK targets, so the constraint is intentionally omitted.
-- **`users` and `user_credentials` are separate tables.** Why: separating auth data (password, secret Q&A) from profile data means query functions that only need name/email don't expose credential columns.
-- **`bookings` table covers national rail only; `metro_trips` covers metro.** Why: the two journey types have different fields (seat assignment exists only on national rail; day pass exists only on metro), so merging them into one table would leave many nullable columns.
-- **National rail fare split into `std_*` and `first_*` columns.** Why: every national rail schedule has exactly two fare classes with fixed base + per-stop rates; flattening them avoids a separate `fare_classes` join table for a fixed two-row case.
+| Decision | Reason |
+|---|---|
+| `stops_in_order` / `travel_time_from_origin` as JSONB | always read as a whole unit, no point splitting into rows |
+| `payments` / `feedback` exclusive-arc | two nullable FKs (`booking_id`, `metro_trip_id`) + CHECK so exactly one is set; PostgreSQL FK can't point at two tables so this is the workaround |
+| `users` and `user_credentials` separate | most queries only need profile info, no reason to expose password columns |
+| `bookings` (rail) and `metro_trips` (metro) separate | rail has seat assignment, metro has day_pass_ref, fields are too different to merge cleanly |
+| national rail fare as `std_*` / `first_*` columns | always exactly two classes, a join table would be overkill |
+| `user_id_seq` SEQUENCE for user IDs | atomic, avoids race condition from `SELECT MAX(user_id) + 1` |
+| `pg_advisory_xact_lock` in `register_user` | sequence handles ID but two threads can still race past the duplicate-email check; lock serialises the whole registration |
+| SERIALIZABLE isolation in `execute_booking` | seat check + insert must be atomic, works together with the partial unique index to block double-booking |
+| `secrets.choice` for ID generation | `random` is predictable, booking/payment IDs should be cryptographically random |
+| day-of-week stored lowercase ('mon', 'tue', ...) | `to_char(date, 'Dy')` returns title-case so queries use `lower()` when comparing; missed this initially and date-filtered queries returned nothing |
+| `ThreadedConnectionPool` (min=2, max=10) | one connection per request is too slow and hits DB limits; pool reuses connections, `_PooledConn` returns them on exit even if an exception happens |
+| email normalised with `.strip().lower()` | done at every entry point (register, login, reset) so "User@Email.COM" and "user@email.com" don't end up as separate accounts |
+| password length check (8–128) in Python | DB constraints don't give useful error messages; 128-char cap also prevents oversized-input attacks on argon2 |
+| argon2id for passwords and secret answers | OWASP recommended, memory-hard, both fields hashed so a DB dump doesn't leak anything usable |
+| single CTE for seat availability | original code did 2 extra queries per schedule (N+1); CTE computes seat totals and booking counts in one round-trip |
 
 ### Graph Schema
 
-- **Three relationship types: `METRO_LINK`, `RAIL_LINK`, `INTERCHANGE_TO`.** Why: keeping them separate lets Dijkstra and path queries target only metro, only rail, or both without filtering on a property. Using a single `CONNECTS_TO` would require `WHERE r.line STARTS WITH 'M'` everywhere.
-- **Every node carries two labels (`:Station:MetroStation` or `:Station:NationalRailStation`).** Why: the shared `:Station` label enables cross-network queries in a single pattern; the specific label enables network-scoped queries without relationship-type filtering.
-- **All links are bidirectional (two directed edges, one each way).** Why: the source JSON defines adjacency from both sides; storing both directions makes Dijkstra traversal straightforward without needing undirected relationship syntax.
-- **`walking_time_min = 5` for all interchange links.** Why: the source data does not specify walking time per interchange; 5 minutes is used as a uniform placeholder.
+| Decision | Reason |
+|---|---|
+| three relationship types: `METRO_LINK`, `RAIL_LINK`, `INTERCHANGE_TO` | separate types let path queries target just metro, just rail, or both without property filtering; one generic type would need `WHERE` clauses everywhere |
+| two labels per node (`:Station` + network-specific) | `:Station` for cross-network queries, `:MetroStation` / `:NationalRailStation` for single-network ones |
+| bidirectional links as two directed edges | source data defines both directions anyway, and `apoc.algo.dijkstra` needs directed edges |
+| `walking_time_min = 5` for all interchanges | source data doesn't specify per-interchange times, using 5 min as placeholder |
 
 ## Prompts That Worked
 
