@@ -56,7 +56,7 @@ CREATE TABLE users (
     first_name      VARCHAR(50)  NOT NULL,
     surname         VARCHAR(50)  NOT NULL,
     full_name       VARCHAR(100) GENERATED ALWAYS AS (first_name || ' ' || surname) STORED,
-    email           VARCHAR(100) NOT NULL UNIQUE,
+    email           VARCHAR(100) NOT NULL UNIQUE CHECK (email LIKE '%@%'),
     phone           VARCHAR(20),
     date_of_birth   DATE,
     registered_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
@@ -139,10 +139,10 @@ CREATE TABLE national_rail_schedules (
     travel_time_from_origin JSONB        NOT NULL,  
     first_train_time        TIME         NOT NULL,
     last_train_time         TIME         NOT NULL,
-    std_base_fare_usd       NUMERIC(6,2) NOT NULL,
-    std_per_stop_rate_usd   NUMERIC(6,2) NOT NULL,
-    first_base_fare_usd     NUMERIC(6,2) NOT NULL,
-    first_per_stop_rate_usd NUMERIC(6,2) NOT NULL,
+    std_base_fare_usd       NUMERIC(6,2) NOT NULL CHECK (std_base_fare_usd >= 0),
+    std_per_stop_rate_usd   NUMERIC(6,2) NOT NULL CHECK (std_per_stop_rate_usd >= 0),
+    first_base_fare_usd     NUMERIC(6,2) NOT NULL CHECK (first_base_fare_usd >= 0),
+    first_per_stop_rate_usd NUMERIC(6,2) NOT NULL CHECK (first_per_stop_rate_usd >= 0),
     frequency_min           INT          NOT NULL
 );
 

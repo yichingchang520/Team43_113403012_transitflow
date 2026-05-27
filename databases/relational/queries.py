@@ -31,7 +31,7 @@ from typing import Optional
 import psycopg2
 import psycopg2.extras
 from argon2 import PasswordHasher
-from argon2.exceptions import VerifyMismatchError
+from argon2.exceptions import VerifyMismatchError, InvalidHashError
 
 _ph = PasswordHasher()
 
@@ -700,7 +700,7 @@ def execute_cancellation(booking_id: str, user_id: str) -> tuple[bool, dict | st
 
             if booking["status"] == "cancelled":
                 return False, "Booking is already cancelled"
-            if booking["status"] == "travelled":
+            if booking["status"] == "completed":
                 return False, "Cannot cancel a completed journey"
 
             # Hours until departure (treat stored times as UTC)
@@ -854,7 +854,7 @@ def login_user(email: str, password: str) -> Optional[dict]:
                 return None
             try:
                 _ph.verify(row["password_hash"], password)
-            except VerifyMismatchError:
+            except (VerifyMismatchError, InvalidHashError):
                 return None
             result = dict(row)
             result.pop("password_hash")
@@ -897,7 +897,7 @@ def verify_secret_answer(email: str, answer: str) -> bool:
             try:
                 _ph.verify(row[0], answer.strip().lower())
                 return True
-            except VerifyMismatchError:
+            except (VerifyMismatchError, InvalidHashError):
                 return False
 
 
