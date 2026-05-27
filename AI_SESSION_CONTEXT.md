@@ -204,7 +204,7 @@ CREATE TABLE metro_trips (
     destination_station_id  VARCHAR(10)  NOT NULL REFERENCES metro_stations(station_id),
     travel_date             DATE         NOT NULL,
     ticket_type             VARCHAR(10)  NOT NULL CHECK (ticket_type IN ('single', 'day_pass')),
-    day_pass_ref            VARCHAR(10),
+    day_pass_ref            VARCHAR(10)  REFERENCES metro_trips(trip_id),
     stops_travelled         INT          CHECK (stops_travelled > 0),
     amount_usd              NUMERIC(8,2) NOT NULL CHECK (amount_usd >= 0),
     status                  VARCHAR(20)  NOT NULL CHECK (status IN ('confirmed', 'completed', 'cancelled')),

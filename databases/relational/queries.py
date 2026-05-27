@@ -744,6 +744,13 @@ def execute_cancellation(booking_id: str, user_id: str) -> tuple[bool, dict | st
                 (booking_id,),
             )
 
+            # Update payment status: refunded if money is returned, else keep as paid
+            payment_status = "refunded" if refund_amount > 0 else "paid"
+            cur.execute(
+                "UPDATE payments SET status = %s WHERE booking_id = %s",
+                (payment_status, booking_id),
+            )
+
             conn.commit()
             return True, {
                 "booking_id":          booking_id,
@@ -901,7 +908,8 @@ def update_password(email: str, new_password: str) -> bool:
             cur.execute(
                 """
                 UPDATE user_credentials
-                SET    password_hash = %s
+                SET    password_hash = %s,
+                       updated_at    = NOW()
                 WHERE  user_id = (SELECT user_id FROM users WHERE email = %s)
                 """,
                 (_ph.hash(new_password), email),
