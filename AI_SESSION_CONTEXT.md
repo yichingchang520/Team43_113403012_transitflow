@@ -284,7 +284,7 @@ CREATE INDEX idx_payments_metro_trip ON payments(metro_trip_id);
 
 - Emails are **normalised** on write and read: `email.strip().lower()`. Always pass normalised emails to auth functions.
 - Passwords: min 8 chars, max 128 chars. Hashed with **argon2id** (`_ph.hash()`). Never store plaintext.
-- `update_password` returns `tuple[bool, str]` — `(True, "")` on success, `(False, reason)` on failure. (Unlike older `bool` return.)
+- `update_password` returns `bool` — `True` on success, `False` on failure (including invalid password length). This matches `ui.py`'s `if not update_password(...)` caller pattern.
 - User ID generation uses `nextval('user_id_seq')` — atomic, no race condition.
 
 ## Agreed Graph Schema
