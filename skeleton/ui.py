@@ -232,8 +232,9 @@ def forgot_reset_password(email: str, answer: str, new_password: str):
     if not verify_secret_answer(email.strip(), answer.strip()):
         return gr.update(value="Incorrect answer. Please try again.", visible=True)
 
-    if not update_password(email.strip(), new_password):
-        return gr.update(value="Failed to update password. Please try again.", visible=True)
+    ok, pw_err = update_password(email.strip(), new_password)
+    if not ok:
+        return gr.update(value=pw_err or "Failed to update password. Please try again.", visible=True)
 
     return gr.update(value="**Password reset successfully. You can now log in.**", visible=True)
 
