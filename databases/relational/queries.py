@@ -30,6 +30,10 @@ from typing import Optional
 
 import psycopg2
 import psycopg2.extras
+from argon2 import PasswordHasher
+from argon2.exceptions import VerifyMismatchError
+
+_ph = PasswordHasher()
 
 from skeleton.config import PG_DSN, VECTOR_TOP_K, VECTOR_SIMILARITY_THRESHOLD
 
@@ -771,8 +775,7 @@ def register_user(
     Register a new user.
     Returns (True, user_id) on success or (False, error_message) on failure.
 
-    NOTE: passwords are stored as plain text here intentionally for teaching
-    purposes. In production, replace with a salted hash (e.g. bcrypt).
+    Passwords and secret answers are hashed with argon2id before storage.
     """
     conn = psycopg2.connect(PG_DSN)
     conn.autocommit = False
@@ -807,7 +810,7 @@ def register_user(
                     (user_id, password_hash, secret_question, secret_answer)
                 VALUES (%s, %s, %s, %s)
                 """,
-                (new_user_id, password, secret_question, secret_answer),
+                (new_user_id, _ph.hash(password), secret_question, _ph.hash(secret_answer.strip().lower())),
             )
 
             conn.commit()
@@ -829,17 +832,25 @@ def login_user(email: str, password: str) -> Optional[dict]:
             cur.execute(
                 """
                 SELECT u.user_id, u.email, u.full_name, u.first_name, u.surname,
-                       u.phone, u.date_of_birth, u.is_active
+                       u.phone, u.date_of_birth, u.is_active,
+                       uc.password_hash
                 FROM users u
                 JOIN user_credentials uc ON uc.user_id = u.user_id
                 WHERE u.email = %s
-                  AND uc.password_hash = %s
                   AND u.is_active = TRUE
                 """,
-                (email, password),
+                (email,),
             )
             row = cur.fetchone()
-            return dict(row) if row else None
+            if not row:
+                return None
+            try:
+                _ph.verify(row["password_hash"], password)
+            except VerifyMismatchError:
+                return None
+            result = dict(row)
+            result.pop("password_hash")
+            return result
 
 
 def get_user_secret_question(email: str) -> Optional[str]:
@@ -875,7 +886,11 @@ def verify_secret_answer(email: str, answer: str) -> bool:
             row = cur.fetchone()
             if not row or not row[0]:
                 return False
-            return row[0].strip().lower() == answer.strip().lower()
+            try:
+                _ph.verify(row[0], answer.strip().lower())
+                return True
+            except VerifyMismatchError:
+                return False
 
 
 def update_password(email: str, new_password: str) -> bool:
@@ -888,7 +903,7 @@ def update_password(email: str, new_password: str) -> bool:
                 SET    password_hash = %s
                 WHERE  user_id = (SELECT user_id FROM users WHERE email = %s)
                 """,
-                (new_password, email),
+                (_ph.hash(new_password), email),
             )
             return cur.rowcount > 0
 
