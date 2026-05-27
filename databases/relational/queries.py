@@ -23,13 +23,15 @@ are already implemented — do not modify them.
 from __future__ import annotations
 
 import json
-import random
+import re
+import secrets
 import string
 from datetime import date, datetime, timezone
 from typing import Optional
 
 import psycopg2
 import psycopg2.extras
+from psycopg2 import pool as _pg_pool
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, InvalidHashError
 
@@ -37,22 +39,81 @@ _ph = PasswordHasher()
 
 from skeleton.config import PG_DSN, VECTOR_TOP_K, VECTOR_SIMILARITY_THRESHOLD
 
+# ── Email validation ──────────────────────────────────────────────────────────
+_EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
 
-def _connect():
-    """Return a new psycopg2 connection with autocommit enabled."""
-    conn = psycopg2.connect(PG_DSN)
-    conn.autocommit = True
-    return conn
+# ── Password policy ───────────────────────────────────────────────────────────
+_PW_MIN_LEN = 8
+_PW_MAX_LEN = 128   # guard against DoS via intentionally slow argon2 hashing
+
+# ── ID alphabet for booking / payment IDs ────────────────────────────────────
+_ID_CHARS = string.ascii_uppercase + string.digits
+
+# ── Connection pool ───────────────────────────────────────────────────────────
+# One pool per process; lazily initialised on first use.
+# min=2 keeps warm connections alive; max=10 caps load on the DB server.
+_pool: _pg_pool.ThreadedConnectionPool | None = None
+_POOL_MIN = 2
+_POOL_MAX = 10
+
+
+def _get_pool() -> _pg_pool.ThreadedConnectionPool:
+    """Lazily initialise and return the thread-safe connection pool."""
+    global _pool
+    if _pool is None:
+        _pool = _pg_pool.ThreadedConnectionPool(_POOL_MIN, _POOL_MAX, PG_DSN)
+    return _pool
+
+
+class _PooledConn:
+    """
+    Context manager: borrows a connection from the pool on enter,
+    resets it to a clean state, and returns it to the pool on exit.
+
+    Usage::
+        with _connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(...)
+    """
+
+    def __init__(self, autocommit: bool = True) -> None:
+        self._autocommit = autocommit
+        self._conn: psycopg2.extensions.connection | None = None
+
+    def __enter__(self) -> psycopg2.extensions.connection:
+        self._conn = _get_pool().getconn()
+        self._conn.autocommit = self._autocommit
+        return self._conn
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self._conn is not None:
+            try:
+                # Roll back any uncommitted work, then reset to a clean state
+                # so the next borrower gets a pristine connection.
+                if not self._conn.autocommit:
+                    self._conn.rollback()
+                self._conn.autocommit = True
+                _get_pool().putconn(self._conn)
+            except Exception:
+                # If we cannot reset, discard the connection entirely so the
+                # pool doesn't hand out a broken connection to the next caller.
+                _get_pool().putconn(self._conn, close=True)
+        return False  # never suppress exceptions
+
+
+def _connect() -> _PooledConn:
+    """Return a pooled read-only (autocommit=True) connection context manager."""
+    return _PooledConn(autocommit=True)
 
 
 def _gen_booking_id() -> str:
-    suffix = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
-    return f"BK-{suffix}"
+    """Cryptographically random booking ID, e.g. 'BK-A3F9K2'."""
+    return "BK-" + "".join(secrets.choice(_ID_CHARS) for _ in range(6))
 
 
 def _gen_payment_id() -> str:
-    suffix = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
-    return f"PM-{suffix}"
+    """Cryptographically random payment ID, e.g. 'PM-X7Q2P1'."""
+    return "PM-" + "".join(secrets.choice(_ID_CHARS) for _ in range(6))
 
 
 # ── Example ───────────────────────────────────────────────────────────────────
@@ -84,88 +145,108 @@ def query_national_rail_availability(
         destination_id:  e.g. "NR05"
         travel_date:     e.g. "2025-06-01" — used to count bookings; omit for general info
     """
-    sql = """
-        SELECT
-            s.schedule_id,
-            s.line,
-            s.service_type,
-            s.direction,
-            s.origin_station_id,
-            s.destination_station_id,
-            s.stops_in_order,
-            s.travel_time_from_origin,
-            s.first_train_time::text  AS first_train_time,
-            s.last_train_time::text   AS last_train_time,
-            s.std_base_fare_usd,
-            s.std_per_stop_rate_usd,
-            s.first_base_fare_usd,
-            s.first_per_stop_rate_usd,
-            s.frequency_min,
-            o_ns.name AS origin_name,
-            d_ns.name AS destination_name,
-            (d_pos.pos - o_pos.pos)::int AS stops_travelled
-        FROM national_rail_schedules s
-        JOIN national_rail_stations o_ns ON o_ns.station_id = %(origin_id)s
-        JOIN national_rail_stations d_ns ON d_ns.station_id = %(destination_id)s
-        JOIN LATERAL (
-            SELECT pos::int
-            FROM jsonb_array_elements_text(s.stops_in_order)
-                 WITH ORDINALITY AS t(val, pos)
-            WHERE val = %(origin_id)s
-        ) AS o_pos ON TRUE
-        JOIN LATERAL (
-            SELECT pos::int
-            FROM jsonb_array_elements_text(s.stops_in_order)
-                 WITH ORDINALITY AS t(val, pos)
-            WHERE val = %(destination_id)s
-        ) AS d_pos ON TRUE
-        WHERE o_pos.pos < d_pos.pos
-    """
-    params: dict = {"origin_id": origin_id, "destination_id": destination_id}
-
+    # When travel_date is given we need seat availability as well.
+    # Use a single CTE query instead of 2 extra round-trips per schedule
+    # (the old approach was an N+1 pattern that scaled badly).
     if travel_date:
-        sql += """
-            AND s.schedule_id IN (
-                SELECT schedule_id FROM national_rail_schedule_days
-                WHERE day_of_week = to_char(%(travel_date)s::date, 'Dy')
+        sql = """
+            WITH seat_totals AS (
+                SELECT sl.schedule_id,
+                       COUNT(se.seat_pk) AS total_seats
+                FROM   seat_layouts sl
+                JOIN   coaches co ON co.layout_id = sl.layout_id
+                JOIN   seats   se ON se.coach_id  = co.coach_id
+                GROUP  BY sl.schedule_id
+            ),
+            booking_counts AS (
+                SELECT schedule_id,
+                       COUNT(*) AS booked_seats
+                FROM   bookings
+                WHERE  travel_date = %(travel_date)s
+                  AND  status NOT IN ('cancelled')
+                GROUP  BY schedule_id
             )
+            SELECT
+                s.schedule_id, s.line, s.service_type, s.direction,
+                s.origin_station_id, s.destination_station_id,
+                s.stops_in_order, s.travel_time_from_origin,
+                s.first_train_time::text  AS first_train_time,
+                s.last_train_time::text   AS last_train_time,
+                s.std_base_fare_usd, s.std_per_stop_rate_usd,
+                s.first_base_fare_usd, s.first_per_stop_rate_usd,
+                s.frequency_min,
+                o_ns.name AS origin_name,
+                d_ns.name AS destination_name,
+                (d_pos.pos - o_pos.pos)::int                       AS stops_travelled,
+                COALESCE(st.total_seats,  0)                       AS seats_total,
+                COALESCE(bc.booked_seats, 0)                       AS seats_booked,
+                COALESCE(st.total_seats, 0)
+                    - COALESCE(bc.booked_seats, 0)                 AS seats_available
+            FROM national_rail_schedules s
+            JOIN national_rail_stations o_ns ON o_ns.station_id = %(origin_id)s
+            JOIN national_rail_stations d_ns ON d_ns.station_id = %(destination_id)s
+            JOIN LATERAL (
+                SELECT pos::int
+                FROM   jsonb_array_elements_text(s.stops_in_order)
+                       WITH ORDINALITY AS t(val, pos)
+                WHERE  val = %(origin_id)s
+            ) AS o_pos ON TRUE
+            JOIN LATERAL (
+                SELECT pos::int
+                FROM   jsonb_array_elements_text(s.stops_in_order)
+                       WITH ORDINALITY AS t(val, pos)
+                WHERE  val = %(destination_id)s
+            ) AS d_pos ON TRUE
+            LEFT JOIN seat_totals    st ON st.schedule_id = s.schedule_id
+            LEFT JOIN booking_counts bc ON bc.schedule_id = s.schedule_id
+            WHERE o_pos.pos < d_pos.pos
+              AND s.schedule_id IN (
+                  SELECT schedule_id FROM national_rail_schedule_days
+                  WHERE  day_of_week = lower(to_char(%(travel_date)s::date, 'Dy'))
+              )
         """
-        params["travel_date"] = travel_date
+        params: dict = {
+            "origin_id":    origin_id,
+            "destination_id": destination_id,
+            "travel_date":  travel_date,
+        }
+    else:
+        sql = """
+            SELECT
+                s.schedule_id, s.line, s.service_type, s.direction,
+                s.origin_station_id, s.destination_station_id,
+                s.stops_in_order, s.travel_time_from_origin,
+                s.first_train_time::text  AS first_train_time,
+                s.last_train_time::text   AS last_train_time,
+                s.std_base_fare_usd, s.std_per_stop_rate_usd,
+                s.first_base_fare_usd, s.first_per_stop_rate_usd,
+                s.frequency_min,
+                o_ns.name AS origin_name,
+                d_ns.name AS destination_name,
+                (d_pos.pos - o_pos.pos)::int AS stops_travelled
+            FROM national_rail_schedules s
+            JOIN national_rail_stations o_ns ON o_ns.station_id = %(origin_id)s
+            JOIN national_rail_stations d_ns ON d_ns.station_id = %(destination_id)s
+            JOIN LATERAL (
+                SELECT pos::int
+                FROM   jsonb_array_elements_text(s.stops_in_order)
+                       WITH ORDINALITY AS t(val, pos)
+                WHERE  val = %(origin_id)s
+            ) AS o_pos ON TRUE
+            JOIN LATERAL (
+                SELECT pos::int
+                FROM   jsonb_array_elements_text(s.stops_in_order)
+                       WITH ORDINALITY AS t(val, pos)
+                WHERE  val = %(destination_id)s
+            ) AS d_pos ON TRUE
+            WHERE o_pos.pos < d_pos.pos
+        """
+        params = {"origin_id": origin_id, "destination_id": destination_id}
 
     with _connect() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(sql, params)
-            rows = [dict(r) for r in cur.fetchall()]
-
-            if travel_date and rows:
-                for row in rows:
-                    cur.execute(
-                        """
-                        SELECT COUNT(*) AS booked
-                        FROM bookings
-                        WHERE schedule_id = %s
-                          AND travel_date  = %s
-                          AND status NOT IN ('cancelled')
-                        """,
-                        (row["schedule_id"], travel_date),
-                    )
-                    row["seats_booked"] = cur.fetchone()["booked"]
-
-                    cur.execute(
-                        """
-                        SELECT COUNT(se.seat_pk) AS total
-                        FROM seat_layouts sl
-                        JOIN coaches co ON co.layout_id = sl.layout_id
-                        JOIN seats   se ON se.coach_id  = co.coach_id
-                        WHERE sl.schedule_id = %s
-                        """,
-                        (row["schedule_id"],),
-                    )
-                    result = cur.fetchone()
-                    row["seats_total"]     = result["total"] if result else 0
-                    row["seats_available"] = row["seats_total"] - row["seats_booked"]
-
-            return rows
+            return [dict(r) for r in cur.fetchall()]
 
 
 def query_national_rail_fare(
@@ -448,13 +529,18 @@ def query_user_bookings(user_email: str) -> dict:
             return {"national_rail": nr_bookings, "metro": metro_trips}
 
 
-def query_payment_info(booking_id: str) -> Optional[dict]:
-    """Return payment record for a booking or metro trip."""
+def query_payment_info(reference_id: str) -> Optional[dict]:
+    """
+    Return payment record for a booking or metro trip.
+
+    Args:
+        reference_id: a booking_id (e.g. "BK-A3F9K2") or a metro trip_id (e.g. "MT001")
+    """
     with _connect() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
                 "SELECT * FROM payments WHERE booking_id = %s OR metro_trip_id = %s",
-                (booking_id, booking_id),
+                (reference_id, reference_id),
             )
             row = cur.fetchone()
             return dict(row) if row else None
@@ -471,6 +557,7 @@ def execute_booking(
     fare_class: str,
     seat_id: str,
     ticket_type: str = "single",
+    payment_method: str = "credit_card",
 ) -> tuple[bool, dict | str]:
     """
     Create a national rail booking for a logged-in user.
@@ -484,13 +571,28 @@ def execute_booking(
         fare_class:             "standard" or "first"
         seat_id:                e.g. "B05" (or "any" to auto-assign)
         ticket_type:            "single" (default) or "return"
+        payment_method:         "credit_card" (default), "debit_card", or "ewallet"
 
     Returns:
         (True, booking_dict)   on success
         (False, error_message) on failure
     """
-    conn = psycopg2.connect(PG_DSN)
+    # Validate payment method before opening connection
+    valid_methods = ("credit_card", "debit_card", "ewallet")
+    if payment_method not in valid_methods:
+        return False, f"Invalid payment method. Must be one of: {', '.join(valid_methods)}"
+
+    # Validate travel date is not in the past
+    try:
+        travel_date_obj = date.fromisoformat(travel_date)
+    except ValueError:
+        return False, "Invalid travel_date format. Use YYYY-MM-DD"
+    if travel_date_obj < date.today():
+        return False, "Travel date cannot be in the past"
+
+    conn = _get_pool().getconn()
     conn.autocommit = False
+    conn.set_session(isolation_level="SERIALIZABLE")
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             # 1. Validate user
@@ -499,7 +601,21 @@ def execute_booking(
                 (user_id,),
             )
             if not cur.fetchone():
+                conn.rollback()
                 return False, "User not found or inactive"
+
+            # 1b. Check the schedule operates on the travel_date's day of week
+            cur.execute(
+                """
+                SELECT 1 FROM national_rail_schedule_days
+                WHERE schedule_id = %s
+                  AND day_of_week = lower(to_char(%s::date, 'Dy'))
+                """,
+                (schedule_id, travel_date),
+            )
+            if not cur.fetchone():
+                conn.rollback()
+                return False, "This schedule does not operate on that day of the week"
 
             # 2. Get schedule — verify origin and destination appear in stops_in_order
             #    in the correct order using LATERAL
@@ -528,6 +644,7 @@ def execute_booking(
             )
             schedule = cur.fetchone()
             if not schedule:
+                conn.rollback()
                 return False, "Schedule not found, or origin/destination not valid for this route"
 
             stops_travelled = schedule["dest_pos"] - schedule["origin_pos"]
@@ -566,6 +683,7 @@ def execute_booking(
                 )
                 seat_row = cur.fetchone()
                 if not seat_row:
+                    conn.rollback()
                     return False, "No available seats for this schedule and date"
                 chosen_seat  = seat_row["seat_id"]
                 chosen_coach = seat_row["coach"]
@@ -584,6 +702,7 @@ def execute_booking(
                 )
                 seat_row = cur.fetchone()
                 if not seat_row:
+                    conn.rollback()
                     return False, f"Seat '{seat_id}' not found in {fare_class} class for this schedule"
 
                 # Check it is not already booked
@@ -599,6 +718,7 @@ def execute_booking(
                     (schedule_id, travel_date, seat_row["coach"], seat_id),
                 )
                 if cur.fetchone():
+                    conn.rollback()
                     return False, f"Seat '{seat_id}' is already booked for {travel_date}"
 
                 chosen_seat  = seat_row["seat_id"]
@@ -636,7 +756,7 @@ def execute_booking(
                 INSERT INTO payments (payment_id, booking_id, metro_trip_id, amount_usd, method, status, paid_at)
                 VALUES (%s, %s, NULL, %s, %s, %s, %s)
                 """,
-                (payment_id, booking_id, amount, "credit_card", "paid", booked_at),
+                (payment_id, booking_id, amount, payment_method, "paid", booked_at),
             )
 
             conn.commit()
@@ -658,11 +778,18 @@ def execute_booking(
                 "status":                  "confirmed",
                 "booked_at":               booked_at.isoformat(),
             }
+    except psycopg2.errors.SerializationFailure:
+        conn.rollback()
+        return False, "Booking failed due to concurrent conflict. Please try again."
     except Exception as e:
         conn.rollback()
         return False, str(e)
     finally:
-        conn.close()
+        try:
+            conn.autocommit = True
+            _get_pool().putconn(conn)
+        except Exception:
+            _get_pool().putconn(conn, close=True)
 
 
 def execute_cancellation(booking_id: str, user_id: str) -> tuple[bool, dict | str]:
@@ -681,7 +808,7 @@ def execute_cancellation(booking_id: str, user_id: str) -> tuple[bool, dict | st
         (True, result_dict)  with refund_amount_usd and policy note
         (False, error_msg)
     """
-    conn = psycopg2.connect(PG_DSN)
+    conn = _get_pool().getconn()
     conn.autocommit = False
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -696,11 +823,14 @@ def execute_cancellation(booking_id: str, user_id: str) -> tuple[bool, dict | st
             )
             booking = cur.fetchone()
             if not booking:
+                conn.rollback()
                 return False, "Booking not found or does not belong to this user"
 
             if booking["status"] == "cancelled":
+                conn.rollback()
                 return False, "Booking is already cancelled"
             if booking["status"] == "completed":
+                conn.rollback()
                 return False, "Cannot cancel a completed journey"
 
             # Hours until departure (treat stored times as UTC)
@@ -764,7 +894,11 @@ def execute_cancellation(booking_id: str, user_id: str) -> tuple[bool, dict | st
         conn.rollback()
         return False, str(e)
     finally:
-        conn.close()
+        try:
+            conn.autocommit = True
+            _get_pool().putconn(conn)
+        except Exception:
+            _get_pool().putconn(conn, close=True)
 
 
 # ── AUTHENTICATION QUERIES ────────────────────────────────────────────────────
@@ -783,23 +917,37 @@ def register_user(
     Returns (True, user_id) on success or (False, error_message) on failure.
 
     Passwords and secret answers are hashed with argon2id before storage.
+    Emails are stored normalised (stripped and lower-cased).
     """
-    conn = psycopg2.connect(PG_DSN)
+    # ── Input validation (fail fast before touching the DB) ──────────────────
+    email = email.strip().lower()
+    if not _EMAIL_RE.match(email):
+        return False, "Invalid email address"
+
+    if len(password) < _PW_MIN_LEN:
+        return False, f"Password must be at least {_PW_MIN_LEN} characters"
+    if len(password) > _PW_MAX_LEN:
+        return False, f"Password must be at most {_PW_MAX_LEN} characters"
+
+    conn = _get_pool().getconn()
     conn.autocommit = False
     try:
         with conn.cursor() as cur:
+            # Advisory lock: serialise concurrent registrations so two threads
+            # cannot both read the same MAX(user_id) and generate a duplicate.
+            cur.execute("SELECT pg_advisory_xact_lock(hashtext('register_user'))")
+
             # Reject duplicate email
             cur.execute("SELECT 1 FROM users WHERE email = %s", (email,))
             if cur.fetchone():
+                conn.rollback()
                 return False, "Email is already registered"
 
-            # Generate next sequential user_id (e.g. RU21, RU22 …)
+            # Atomic user ID generation via sequence — no race condition.
             cur.execute(
-                "SELECT COALESCE(MAX(CAST(SUBSTRING(user_id FROM 3) AS INTEGER)), 0) + 1 "
-                "FROM users WHERE user_id ~ '^RU[0-9]+$'"
+                "SELECT 'RU' || LPAD(nextval('user_id_seq')::text, 2, '0')"
             )
-            next_num   = cur.fetchone()[0]
-            new_user_id = f"RU{next_num:02d}"
+            new_user_id = cur.fetchone()[0]
 
             dob = date(year_of_birth, 1, 1)
 
@@ -809,7 +957,8 @@ def register_user(
                     (user_id, first_name, surname, email, date_of_birth, registered_at, is_active)
                 VALUES (%s, %s, %s, %s, %s, %s, TRUE)
                 """,
-                (new_user_id, first_name, surname, email, dob, datetime.now(timezone.utc)),
+                (new_user_id, first_name.strip(), surname.strip(),
+                 email, dob, datetime.now(timezone.utc)),
             )
             cur.execute(
                 """
@@ -827,7 +976,11 @@ def register_user(
         conn.rollback()
         return False, str(e)
     finally:
-        conn.close()
+        try:
+            conn.autocommit = True
+            _get_pool().putconn(conn)
+        except Exception:
+            _get_pool().putconn(conn, close=True)
 
 
 def login_user(email: str, password: str) -> Optional[dict]:
@@ -847,7 +1000,7 @@ def login_user(email: str, password: str) -> Optional[dict]:
                 WHERE u.email = %s
                   AND u.is_active = TRUE
                 """,
-                (email,),
+                (email.strip().lower(),),
             )
             row = cur.fetchone()
             if not row:
@@ -872,7 +1025,7 @@ def get_user_secret_question(email: str) -> Optional[str]:
                 JOIN users u ON u.user_id = uc.user_id
                 WHERE u.email = %s
                 """,
-                (email,),
+                (email.strip().lower(),),
             )
             row = cur.fetchone()
             return row[0] if row else None
@@ -889,7 +1042,7 @@ def verify_secret_answer(email: str, answer: str) -> bool:
                 JOIN users u ON u.user_id = uc.user_id
                 WHERE u.email = %s
                 """,
-                (email,),
+                (email.strip().lower(),),
             )
             row = cur.fetchone()
             if not row or not row[0]:
@@ -901,8 +1054,19 @@ def verify_secret_answer(email: str, answer: str) -> bool:
                 return False
 
 
-def update_password(email: str, new_password: str) -> bool:
-    """Update the password for a user. Returns True if the row was updated."""
+def update_password(email: str, new_password: str) -> tuple[bool, str]:
+    """
+    Update the password for a user.
+
+    Returns:
+        (True,  "")              on success
+        (False, error_message)   on failure (invalid length, email not found, etc.)
+    """
+    if len(new_password) < _PW_MIN_LEN:
+        return False, f"Password must be at least {_PW_MIN_LEN} characters"
+    if len(new_password) > _PW_MAX_LEN:
+        return False, f"Password must be at most {_PW_MAX_LEN} characters"
+
     with _connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -912,9 +1076,11 @@ def update_password(email: str, new_password: str) -> bool:
                        updated_at    = NOW()
                 WHERE  user_id = (SELECT user_id FROM users WHERE email = %s)
                 """,
-                (_ph.hash(new_password), email),
+                (_ph.hash(new_password), email.strip().lower()),
             )
-            return cur.rowcount > 0
+            if cur.rowcount > 0:
+                return True, ""
+            return False, "No account found for that email address"
 
 
 # ── VECTOR / RAG QUERIES — do not modify ─────────────────────────────────────

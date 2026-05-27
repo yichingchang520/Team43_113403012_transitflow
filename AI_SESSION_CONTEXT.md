@@ -28,12 +28,26 @@ TransitFlow is a Python-based AI chat assistant for a fictional transit operator
 - **Return types:** Use type hints. Read-only functions return `list[dict]` or `Optional[dict]`
 - **Empty results:** Return `[]` or `None` (as documented), never raise an exception for "not found"
 - **SQL:** Use `%s` placeholders for all user inputs — never string-format into SQL
-- **Relational pattern:** Use `_connect()` helper + `psycopg2.extras.RealDictCursor`:
+- **Relational pattern:** Use `_connect()` helper + `psycopg2.extras.RealDictCursor`. `_connect()` returns a connection borrowed from a `ThreadedConnectionPool`; it is automatically returned to the pool on `__exit__`:
   ```python
   with _connect() as conn:
       with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
           cur.execute("SELECT ...", (param,))
           return [dict(row) for row in cur.fetchall()]
+  ```
+  For write operations, borrow from the pool directly and return it in `finally`:
+  ```python
+  conn = _get_pool().getconn()
+  conn.autocommit = False
+  try:
+      ...
+      conn.commit()
+  except Exception:
+      conn.rollback()
+      raise
+  finally:
+      conn.autocommit = True
+      _get_pool().putconn(conn)
   ```
 - **Graph pattern:** Use `_driver()` helper + session:
   ```python
@@ -51,6 +65,9 @@ TransitFlow is a Python-based AI chat assistant for a fictional transit operator
   ============================================================ -->
 
 ```sql
+-- Sequence for atomic user ID generation (prevents race condition on concurrent registration)
+CREATE SEQUENCE user_id_seq;
+
 CREATE TABLE users (
     user_id         VARCHAR(10)  PRIMARY KEY,
     first_name      VARCHAR(50)  NOT NULL,
@@ -118,7 +135,7 @@ CREATE TABLE metro_schedules (
     last_train_time     TIME         NOT NULL,
     base_fare_usd       NUMERIC(6,2) NOT NULL CHECK (base_fare_usd >= 0),
     per_stop_rate_usd   NUMERIC(6,2) NOT NULL CHECK (per_stop_rate_usd >= 0),
-    frequency_min       INT          NOT NULL
+    frequency_min       INT          NOT NULL CHECK (frequency_min > 0)
 );
 
 CREATE TABLE metro_schedule_days (
@@ -143,7 +160,7 @@ CREATE TABLE national_rail_schedules (
     std_per_stop_rate_usd   NUMERIC(6,2) NOT NULL CHECK (std_per_stop_rate_usd >= 0),
     first_base_fare_usd     NUMERIC(6,2) NOT NULL CHECK (first_base_fare_usd >= 0),
     first_per_stop_rate_usd NUMERIC(6,2) NOT NULL CHECK (first_per_stop_rate_usd >= 0),
-    frequency_min           INT          NOT NULL
+    frequency_min           INT          NOT NULL CHECK (frequency_min > 0)
 );
 
 
@@ -255,9 +272,20 @@ CREATE UNIQUE INDEX idx_prevent_double_booking
 
 -- Prevent duplicate feedback per booking
 CREATE UNIQUE INDEX idx_feedback_unique_booking
-    ON feedback (booking_id);
+    ON feedback (booking_id) WHERE booking_id IS NOT NULL;
 
+CREATE UNIQUE INDEX idx_feedback_unique_metro_trip
+    ON feedback (metro_trip_id) WHERE metro_trip_id IS NOT NULL;
+
+CREATE INDEX idx_payments_metro_trip ON payments(metro_trip_id);
 ```
+
+## Auth / Security Notes
+
+- Emails are **normalised** on write and read: `email.strip().lower()`. Always pass normalised emails to auth functions.
+- Passwords: min 8 chars, max 128 chars. Hashed with **argon2id** (`_ph.hash()`). Never store plaintext.
+- `update_password` returns `tuple[bool, str]` — `(True, "")` on success, `(False, reason)` on failure. (Unlike older `bool` return.)
+- User ID generation uses `nextval('user_id_seq')` — atomic, no race condition.
 
 ## Agreed Graph Schema
 

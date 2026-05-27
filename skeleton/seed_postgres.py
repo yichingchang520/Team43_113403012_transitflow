@@ -257,6 +257,14 @@ def seed_users(cur):
                     cred_rows)
     print(f"  user_credentials: {n} rows")
 
+    # Sync the sequence so new registrations continue after the seeded IDs
+    cur.execute(
+        "SELECT setval('user_id_seq', "
+        "(SELECT COALESCE(MAX(CAST(SUBSTRING(user_id FROM 3) AS INTEGER)), 0) "
+        " FROM users WHERE user_id ~ '^RU[0-9]+$'))"
+    )
+    print("  user_id_seq synced")
+
 
 def seed_national_rail_bookings(cur):
     data = load("bookings.json")

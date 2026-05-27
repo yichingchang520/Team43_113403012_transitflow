@@ -25,6 +25,9 @@ CREATE TABLE users (
     is_active       BOOLEAN      NOT NULL DEFAULT TRUE
 );
 
+-- Sequence for atomic, race-condition-free user ID generation
+CREATE SEQUENCE user_id_seq;
+
 CREATE TABLE user_credentials (
     user_id           VARCHAR(10)  PRIMARY KEY REFERENCES users(user_id),
     password_hash     VARCHAR(255) NOT NULL,
