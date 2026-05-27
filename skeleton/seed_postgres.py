@@ -15,6 +15,9 @@ import sys
 
 import psycopg2
 from psycopg2.extras import execute_values
+from argon2 import PasswordHasher
+
+_ph = PasswordHasher()
 
 # ── resolve paths ────────────────────────────────────────────────────────────
 SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
@@ -235,9 +238,12 @@ def seed_users(cur):
             u["email"], u.get("phone"), u.get("date_of_birth"),
             u["registered_at"], u["is_active"],
         ))
+        raw_answer = u.get("secret_answer") or ""
         cred_rows.append((
-            u["user_id"], u["password"],
-            u.get("secret_question"), u.get("secret_answer"),
+            u["user_id"],
+            _ph.hash(u["password"]),
+            u.get("secret_question"),
+            _ph.hash(raw_answer.strip().lower()),
         ))
 
     n = insert_many(cur, "users",
