@@ -63,12 +63,14 @@ CREATE TABLE users (
     is_active       BOOLEAN      NOT NULL DEFAULT TRUE
 );
 
-CREATE TABLE user_credentials ( 
-user_id 		VARCHAR(10) PRIMARY KEY REFERENCES users(user_id), 
-password_hash 	VARCHAR(255) NOT NULL, 
-secret_question 	VARCHAR(255), 
-secret_answer 	VARCHAR(255) 
-); 
+CREATE TABLE user_credentials (
+    user_id           VARCHAR(10)  PRIMARY KEY REFERENCES users(user_id),
+    password_hash     VARCHAR(255) NOT NULL,
+    secret_question   VARCHAR(255),
+    secret_answer     VARCHAR(255),
+    hashing_algorithm VARCHAR(50)  NOT NULL DEFAULT 'argon2id',
+    updated_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
 
 CREATE TABLE metro_stations (
     station_id                      VARCHAR(10)  PRIMARY KEY,
@@ -211,21 +213,31 @@ CREATE TABLE metro_trips (
 );
 
 CREATE TABLE payments (
-    payment_id  VARCHAR(10)  PRIMARY KEY,
-    booking_id  VARCHAR(10)  NOT NULL,   
-    amount_usd  NUMERIC(8,2) NOT NULL CHECK (amount_usd >= 0),
-    method      VARCHAR(20)  NOT NULL CHECK (method IN ('credit_card', 'debit_card', 'ewallet')),
-    status      VARCHAR(20)  NOT NULL CHECK (status IN ('paid', 'pending', 'refunded', 'failed')),
-    paid_at     TIMESTAMPTZ  NOT NULL
+    payment_id    VARCHAR(10)  PRIMARY KEY,
+    booking_id    VARCHAR(10)  REFERENCES bookings(booking_id),
+    metro_trip_id VARCHAR(10)  REFERENCES metro_trips(trip_id),
+    amount_usd    NUMERIC(8,2) NOT NULL CHECK (amount_usd >= 0),
+    method        VARCHAR(20)  NOT NULL CHECK (method IN ('credit_card', 'debit_card', 'ewallet')),
+    status        VARCHAR(20)  NOT NULL CHECK (status IN ('paid', 'pending', 'refunded', 'failed')),
+    paid_at       TIMESTAMPTZ  NOT NULL,
+    CONSTRAINT chk_payment_exclusive_arc CHECK (
+        (booking_id IS NOT NULL AND metro_trip_id IS NULL) OR
+        (booking_id IS NULL AND metro_trip_id IS NOT NULL)
+    )
 );
 
 CREATE TABLE feedback (
-    feedback_id     VARCHAR(10)  PRIMARY KEY,
-    booking_id      VARCHAR(10)  NOT NULL,   
-    user_id         VARCHAR(10)  NOT NULL REFERENCES users(user_id),
-    rating          SMALLINT     NOT NULL CHECK (rating BETWEEN 1 AND 5),
-    comment         TEXT,
-    submitted_at    TIMESTAMPTZ  NOT NULL
+    feedback_id   VARCHAR(10) PRIMARY KEY,
+    booking_id    VARCHAR(10) REFERENCES bookings(booking_id),
+    metro_trip_id VARCHAR(10) REFERENCES metro_trips(trip_id),
+    user_id       VARCHAR(10) NOT NULL REFERENCES users(user_id),
+    rating        SMALLINT    NOT NULL CHECK (rating BETWEEN 1 AND 5),
+    comment       TEXT,
+    submitted_at  TIMESTAMPTZ NOT NULL,
+    CONSTRAINT chk_feedback_exclusive_arc CHECK (
+        (booking_id IS NOT NULL AND metro_trip_id IS NULL) OR
+        (booking_id IS NULL AND metro_trip_id IS NOT NULL)
+    )
 );
 
 CREATE INDEX idx_bookings_user        ON bookings(user_id);

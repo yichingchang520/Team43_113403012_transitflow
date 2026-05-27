@@ -453,8 +453,8 @@ def query_payment_info(booking_id: str) -> Optional[dict]:
     with _connect() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
-                "SELECT * FROM payments WHERE booking_id = %s",
-                (booking_id,),
+                "SELECT * FROM payments WHERE booking_id = %s OR metro_trip_id = %s",
+                (booking_id, booking_id),
             )
             row = cur.fetchone()
             return dict(row) if row else None
@@ -633,10 +633,10 @@ def execute_booking(
 
             cur.execute(
                 """
-                INSERT INTO payments (payment_id, booking_id, amount_usd, method, status, paid_at)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                INSERT INTO payments (payment_id, booking_id, metro_trip_id, amount_usd, method, status, paid_at)
+                VALUES (%s, %s, NULL, %s, %s, %s, %s)
                 """,
-                (payment_id, booking_id, amount, "card", "paid", booked_at),
+                (payment_id, booking_id, amount, "credit_card", "paid", booked_at),
             )
 
             conn.commit()
@@ -810,7 +810,8 @@ def register_user(
                     (user_id, password_hash, secret_question, secret_answer)
                 VALUES (%s, %s, %s, %s)
                 """,
-                (new_user_id, _ph.hash(password), secret_question, _ph.hash(secret_answer.strip().lower())),
+                (new_user_id, _ph.hash(password), secret_question,
+                 _ph.hash(secret_answer.strip().lower()) if secret_answer else None),
             )
 
             conn.commit()

@@ -238,12 +238,12 @@ def seed_users(cur):
             u["email"], u.get("phone"), u.get("date_of_birth"),
             u["registered_at"], u["is_active"],
         ))
-        raw_answer = u.get("secret_answer") or ""
+        raw_answer = u.get("secret_answer")
         cred_rows.append((
             u["user_id"],
             _ph.hash(u["password"]),
             u.get("secret_question"),
-            _ph.hash(raw_answer.strip().lower()),
+            _ph.hash(raw_answer.strip().lower()) if raw_answer else None,
         ))
 
     n = insert_many(cur, "users",
@@ -307,13 +307,16 @@ def seed_metro_travels(cur):
 def seed_payments(cur):
     data = load("payments.json")
 
-    rows = [
-        (p["payment_id"], p["booking_id"], p["amount_usd"],
-         p["method"], p["status"], p["paid_at"])
-        for p in data
-    ]
+    rows = []
+    for p in data:
+        bid = p["booking_id"]
+        # BK* → national rail booking; MT* → metro trip
+        if bid.startswith("BK"):
+            rows.append((p["payment_id"], bid, None, p["amount_usd"], p["method"], p["status"], p["paid_at"]))
+        else:
+            rows.append((p["payment_id"], None, bid, p["amount_usd"], p["method"], p["status"], p["paid_at"]))
     n = insert_many(cur, "payments",
-                    ["payment_id", "booking_id", "amount_usd", "method", "status", "paid_at"],
+                    ["payment_id", "booking_id", "metro_trip_id", "amount_usd", "method", "status", "paid_at"],
                     rows)
     print(f"  payments: {n} rows")
 
@@ -321,13 +324,16 @@ def seed_payments(cur):
 def seed_feedback(cur):
     data = load("feedback.json")
 
-    rows = [
-        (f["feedback_id"], f["booking_id"], f["user_id"],
-         f["rating"], f.get("comment"), f["submitted_at"])
-        for f in data
-    ]
+    rows = []
+    for f in data:
+        bid = f["booking_id"]
+        # BK* → national rail booking; MT* → metro trip
+        if bid.startswith("BK"):
+            rows.append((f["feedback_id"], bid, None, f["user_id"], f["rating"], f.get("comment"), f["submitted_at"]))
+        else:
+            rows.append((f["feedback_id"], None, bid, f["user_id"], f["rating"], f.get("comment"), f["submitted_at"]))
     n = insert_many(cur, "feedback",
-                    ["feedback_id", "booking_id", "user_id",
+                    ["feedback_id", "booking_id", "metro_trip_id", "user_id",
                      "rating", "comment", "submitted_at"],
                     rows)
     print(f"  feedback: {n} rows")
