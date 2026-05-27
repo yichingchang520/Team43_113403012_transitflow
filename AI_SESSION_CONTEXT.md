@@ -140,7 +140,7 @@ CREATE TABLE metro_schedules (
 
 CREATE TABLE metro_schedule_days (
     schedule_id VARCHAR(20) NOT NULL REFERENCES metro_schedules(schedule_id),
-    day_of_week VARCHAR(3)  NOT NULL,  
+    day_of_week VARCHAR(3)  NOT NULL CHECK (day_of_week IN ('mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun')),
     PRIMARY KEY (schedule_id, day_of_week)
 );
 
@@ -166,7 +166,7 @@ CREATE TABLE national_rail_schedules (
 
 CREATE TABLE national_rail_schedule_days (
     schedule_id VARCHAR(20) NOT NULL REFERENCES national_rail_schedules(schedule_id),
-    day_of_week VARCHAR(3)  NOT NULL,
+    day_of_week VARCHAR(3)  NOT NULL CHECK (day_of_week IN ('mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun')),
     PRIMARY KEY (schedule_id, day_of_week)
 );
 
@@ -403,6 +403,7 @@ def query_station_connections(station_id: str) -> list[dict]: ...
 | SERIALIZABLE isolation in `execute_booking` | seat check + insert must be atomic, works together with the partial unique index to block double-booking |
 | `secrets.choice` for ID generation | `random` is predictable, booking/payment IDs should be cryptographically random |
 | day-of-week stored lowercase ('mon', 'tue', ...) | `to_char(date, 'Dy')` returns title-case so queries use `lower()` when comparing; missed this initially and date-filtered queries returned nothing |
+| `day_of_week` CHECK constraint on both schedule_days tables | without it any string passes (e.g. 'xyz', 'MON'); CHECK limits to the 7 valid lowercase codes |
 | `ThreadedConnectionPool` (min=2, max=10) | one connection per request is too slow and hits DB limits; pool reuses connections, `_PooledConn` returns them on exit even if an exception happens |
 | email normalised with `.strip().lower()` | done at every entry point (register, login, reset) so "User@Email.COM" and "user@email.com" don't end up as separate accounts |
 | password length check (8–128) in Python | DB constraints don't give useful error messages; 128-char cap also prevents oversized-input attacks on argon2 |

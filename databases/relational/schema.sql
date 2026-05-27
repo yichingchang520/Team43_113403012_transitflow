@@ -92,7 +92,7 @@ CREATE TABLE metro_schedules (
 
 CREATE TABLE metro_schedule_days (
     schedule_id VARCHAR(20) NOT NULL REFERENCES metro_schedules(schedule_id),
-    day_of_week VARCHAR(3)  NOT NULL,
+    day_of_week VARCHAR(3)  NOT NULL CHECK (day_of_week IN ('mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun')),
     PRIMARY KEY (schedule_id, day_of_week)
 );
 
@@ -117,7 +117,7 @@ CREATE TABLE national_rail_schedules (
 
 CREATE TABLE national_rail_schedule_days (
     schedule_id VARCHAR(20) NOT NULL REFERENCES national_rail_schedules(schedule_id),
-    day_of_week VARCHAR(3)  NOT NULL,
+    day_of_week VARCHAR(3)  NOT NULL CHECK (day_of_week IN ('mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun')),
     PRIMARY KEY (schedule_id, day_of_week)
 );
 
