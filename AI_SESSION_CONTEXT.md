@@ -28,12 +28,26 @@ TransitFlow is a Python-based AI chat assistant for a fictional transit operator
 - **Return types:** Use type hints. Read-only functions return `list[dict]` or `Optional[dict]`
 - **Empty results:** Return `[]` or `None` (as documented), never raise an exception for "not found"
 - **SQL:** Use `%s` placeholders for all user inputs — never string-format into SQL
-- **Relational pattern:** Use `_connect()` helper + `psycopg2.extras.RealDictCursor`:
+- **Relational pattern:** Use `_connect()` helper + `psycopg2.extras.RealDictCursor`. `_connect()` returns a connection borrowed from a `ThreadedConnectionPool`; it is automatically returned to the pool on `__exit__`:
   ```python
   with _connect() as conn:
       with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
           cur.execute("SELECT ...", (param,))
           return [dict(row) for row in cur.fetchall()]
+  ```
+  For write operations, borrow from the pool directly and return it in `finally`:
+  ```python
+  conn = _get_pool().getconn()
+  conn.autocommit = False
+  try:
+      ...
+      conn.commit()
+  except Exception:
+      conn.rollback()
+      raise
+  finally:
+      conn.autocommit = True
+      _get_pool().putconn(conn)
   ```
 - **Graph pattern:** Use `_driver()` helper + session:
   ```python
@@ -51,22 +65,29 @@ TransitFlow is a Python-based AI chat assistant for a fictional transit operator
   ============================================================ -->
 
 ```sql
+-- Sequence for atomic user ID generation (prevents race condition on concurrent registration)
+CREATE SEQUENCE user_id_seq;
+
 CREATE TABLE users (
     user_id         VARCHAR(10)  PRIMARY KEY,
-    full_name       VARCHAR(100) NOT NULL,
-    email           VARCHAR(100) NOT NULL UNIQUE,
+    first_name      VARCHAR(50)  NOT NULL,
+    surname         VARCHAR(50)  NOT NULL,
+    full_name       VARCHAR(100) GENERATED ALWAYS AS (first_name || ' ' || surname) STORED,
+    email           VARCHAR(100) NOT NULL UNIQUE CHECK (email LIKE '%@%'),
     phone           VARCHAR(20),
     date_of_birth   DATE,
     registered_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     is_active       BOOLEAN      NOT NULL DEFAULT TRUE
 );
 
-CREATE TABLE user_credentials ( 
-user_id 		VARCHAR(10) PRIMARY KEY REFERENCES users(user_id), 
-password_hash 	VARCHAR(255) NOT NULL, 
-secret_question 	VARCHAR(255), 
-secret_answer 	VARCHAR(255) 
-); 
+CREATE TABLE user_credentials (
+    user_id           VARCHAR(10)  PRIMARY KEY REFERENCES users(user_id),
+    password_hash     VARCHAR(255) NOT NULL,
+    secret_question   VARCHAR(255),
+    secret_answer     VARCHAR(255),
+    hashing_algorithm VARCHAR(50)  NOT NULL DEFAULT 'argon2id',
+    updated_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
 
 CREATE TABLE metro_stations (
     station_id                      VARCHAR(10)  PRIMARY KEY,
@@ -112,21 +133,21 @@ CREATE TABLE metro_schedules (
     travel_time_from_origin JSONB    NOT NULL,  
     first_train_time    TIME         NOT NULL,
     last_train_time     TIME         NOT NULL,
-    base_fare_usd       NUMERIC(6,2) NOT NULL,
-    per_stop_rate_usd   NUMERIC(6,2) NOT NULL,
-    frequency_min       INT          NOT NULL
+    base_fare_usd       NUMERIC(6,2) NOT NULL CHECK (base_fare_usd >= 0),
+    per_stop_rate_usd   NUMERIC(6,2) NOT NULL CHECK (per_stop_rate_usd >= 0),
+    frequency_min       INT          NOT NULL CHECK (frequency_min > 0)
 );
 
 CREATE TABLE metro_schedule_days (
     schedule_id VARCHAR(20) NOT NULL REFERENCES metro_schedules(schedule_id),
-    day_of_week VARCHAR(3)  NOT NULL,  
+    day_of_week VARCHAR(3)  NOT NULL CHECK (day_of_week IN ('mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun')),
     PRIMARY KEY (schedule_id, day_of_week)
 );
 
 CREATE TABLE national_rail_schedules (
     schedule_id             VARCHAR(20)  PRIMARY KEY,
     line                    VARCHAR(10)  NOT NULL,
-    service_type            VARCHAR(10)  NOT NULL,  
+    service_type            VARCHAR(10)  NOT NULL CHECK (service_type IN ('normal', 'express')),
     direction               VARCHAR(20)  NOT NULL,
     origin_station_id       VARCHAR(10)  NOT NULL REFERENCES national_rail_stations(station_id),
     destination_station_id  VARCHAR(10)  NOT NULL REFERENCES national_rail_stations(station_id),
@@ -135,17 +156,17 @@ CREATE TABLE national_rail_schedules (
     travel_time_from_origin JSONB        NOT NULL,  
     first_train_time        TIME         NOT NULL,
     last_train_time         TIME         NOT NULL,
-    std_base_fare_usd       NUMERIC(6,2) NOT NULL,
-    std_per_stop_rate_usd   NUMERIC(6,2) NOT NULL,
-    first_base_fare_usd     NUMERIC(6,2) NOT NULL,
-    first_per_stop_rate_usd NUMERIC(6,2) NOT NULL,
-    frequency_min           INT          NOT NULL
+    std_base_fare_usd       NUMERIC(6,2) NOT NULL CHECK (std_base_fare_usd >= 0),
+    std_per_stop_rate_usd   NUMERIC(6,2) NOT NULL CHECK (std_per_stop_rate_usd >= 0),
+    first_base_fare_usd     NUMERIC(6,2) NOT NULL CHECK (first_base_fare_usd >= 0),
+    first_per_stop_rate_usd NUMERIC(6,2) NOT NULL CHECK (first_per_stop_rate_usd >= 0),
+    frequency_min           INT          NOT NULL CHECK (frequency_min > 0)
 );
 
 
 CREATE TABLE national_rail_schedule_days (
     schedule_id VARCHAR(20) NOT NULL REFERENCES national_rail_schedules(schedule_id),
-    day_of_week VARCHAR(3)  NOT NULL,
+    day_of_week VARCHAR(3)  NOT NULL CHECK (day_of_week IN ('mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun')),
     PRIMARY KEY (schedule_id, day_of_week)
 );
 
@@ -159,7 +180,7 @@ CREATE TABLE coaches (
     coach_id    SERIAL       PRIMARY KEY,
     layout_id   VARCHAR(10)  NOT NULL REFERENCES seat_layouts(layout_id),
     coach       VARCHAR(5)   NOT NULL,   
-    fare_class  VARCHAR(10)  NOT NULL,   
+    fare_class  VARCHAR(10)  NOT NULL CHECK (fare_class IN ('standard', 'first')),
     UNIQUE (layout_id, coach)
 );
 
@@ -181,13 +202,13 @@ CREATE TABLE bookings (
     destination_station_id  VARCHAR(10)  NOT NULL REFERENCES national_rail_stations(station_id),
     travel_date             DATE         NOT NULL,
     departure_time          TIME         NOT NULL,
-    ticket_type             VARCHAR(10)  NOT NULL,  
-    fare_class              VARCHAR(10)  NOT NULL,  
+    ticket_type             VARCHAR(10)  NOT NULL CHECK (ticket_type IN ('single', 'return', 'season')),
+    fare_class              VARCHAR(10)  NOT NULL CHECK (fare_class IN ('standard', 'first')),
     coach                   VARCHAR(5)   NOT NULL,
     seat_id                 VARCHAR(10)  NOT NULL,
-    stops_travelled         INT          NOT NULL,
-    amount_usd              NUMERIC(8,2) NOT NULL,
-    status                  VARCHAR(20)  NOT NULL,  
+    stops_travelled         INT          NOT NULL CHECK (stops_travelled > 0),
+    amount_usd              NUMERIC(8,2) NOT NULL CHECK (amount_usd >= 0),
+    status                  VARCHAR(20)  NOT NULL CHECK (status IN ('confirmed', 'completed', 'cancelled')),
     booked_at               TIMESTAMPTZ  NOT NULL,
     travelled_at            TIMESTAMPTZ
 );
@@ -199,31 +220,41 @@ CREATE TABLE metro_trips (
     origin_station_id       VARCHAR(10)  NOT NULL REFERENCES metro_stations(station_id),
     destination_station_id  VARCHAR(10)  NOT NULL REFERENCES metro_stations(station_id),
     travel_date             DATE         NOT NULL,
-    ticket_type             VARCHAR(10)  NOT NULL,  
-    day_pass_ref            VARCHAR(10),            
-    stops_travelled         INT,                    
-    amount_usd              NUMERIC(8,2) NOT NULL,
-    status                  VARCHAR(20)  NOT NULL,  
+    ticket_type             VARCHAR(10)  NOT NULL CHECK (ticket_type IN ('single', 'day_pass')),
+    day_pass_ref            VARCHAR(10)  REFERENCES metro_trips(trip_id),
+    stops_travelled         INT          CHECK (stops_travelled > 0),
+    amount_usd              NUMERIC(8,2) NOT NULL CHECK (amount_usd >= 0),
+    status                  VARCHAR(20)  NOT NULL CHECK (status IN ('confirmed', 'completed', 'cancelled')),
     purchased_at            TIMESTAMPTZ,
     travelled_at            TIMESTAMPTZ
 );
 
 CREATE TABLE payments (
-    payment_id  VARCHAR(10)  PRIMARY KEY,
-    booking_id  VARCHAR(10)  NOT NULL,   
-    amount_usd  NUMERIC(8,2) NOT NULL,
-    method      VARCHAR(20)  NOT NULL,   
-    status      VARCHAR(20)  NOT NULL,   
-    paid_at     TIMESTAMPTZ  NOT NULL
+    payment_id    VARCHAR(10)  PRIMARY KEY,
+    booking_id    VARCHAR(10)  REFERENCES bookings(booking_id),
+    metro_trip_id VARCHAR(10)  REFERENCES metro_trips(trip_id),
+    amount_usd    NUMERIC(8,2) NOT NULL CHECK (amount_usd >= 0),
+    method        VARCHAR(20)  NOT NULL CHECK (method IN ('credit_card', 'debit_card', 'ewallet')),
+    status        VARCHAR(20)  NOT NULL CHECK (status IN ('paid', 'pending', 'refunded', 'failed')),
+    paid_at       TIMESTAMPTZ  NOT NULL,
+    CONSTRAINT chk_payment_exclusive_arc CHECK (
+        (booking_id IS NOT NULL AND metro_trip_id IS NULL) OR
+        (booking_id IS NULL AND metro_trip_id IS NOT NULL)
+    )
 );
 
 CREATE TABLE feedback (
-    feedback_id     VARCHAR(10)  PRIMARY KEY,
-    booking_id      VARCHAR(10)  NOT NULL,   
-    user_id         VARCHAR(10)  NOT NULL REFERENCES users(user_id),
-    rating          SMALLINT     NOT NULL CHECK (rating BETWEEN 1 AND 5),
-    comment         TEXT,
-    submitted_at    TIMESTAMPTZ  NOT NULL
+    feedback_id   VARCHAR(10) PRIMARY KEY,
+    booking_id    VARCHAR(10) REFERENCES bookings(booking_id),
+    metro_trip_id VARCHAR(10) REFERENCES metro_trips(trip_id),
+    user_id       VARCHAR(10) NOT NULL REFERENCES users(user_id),
+    rating        SMALLINT    NOT NULL CHECK (rating BETWEEN 1 AND 5),
+    comment       TEXT,
+    submitted_at  TIMESTAMPTZ NOT NULL,
+    CONSTRAINT chk_feedback_exclusive_arc CHECK (
+        (booking_id IS NOT NULL AND metro_trip_id IS NULL) OR
+        (booking_id IS NULL AND metro_trip_id IS NOT NULL)
+    )
 );
 
 CREATE INDEX idx_bookings_user        ON bookings(user_id);
@@ -234,229 +265,86 @@ CREATE INDEX idx_metro_trips_date     ON metro_trips(travel_date);
 CREATE INDEX idx_payments_booking     ON payments(booking_id);
 CREATE INDEX idx_feedback_user        ON feedback(user_id);
 
+-- Prevent double booking: same train, same date, same seat cannot be booked twice
+CREATE UNIQUE INDEX idx_prevent_double_booking
+    ON bookings (schedule_id, travel_date, coach, seat_id)
+    WHERE status IN ('confirmed', 'completed');
+
+-- Prevent duplicate feedback per booking
+CREATE UNIQUE INDEX idx_feedback_unique_booking
+    ON feedback (booking_id) WHERE booking_id IS NOT NULL;
+
+CREATE UNIQUE INDEX idx_feedback_unique_metro_trip
+    ON feedback (metro_trip_id) WHERE metro_trip_id IS NOT NULL;
+
+CREATE INDEX idx_payments_metro_trip ON payments(metro_trip_id);
 ```
+
+## Auth / Security Notes
+
+- Emails are **normalised** on write and read: `email.strip().lower()`. Always pass normalised emails to auth functions.
+- Passwords: min 8 chars, max 128 chars. Hashed with **argon2id** (`_ph.hash()`). Never store plaintext.
+- `update_password` returns `bool` — `True` on success, `False` on failure (including invalid password length). This matches `ui.py`'s `if not update_password(...)` caller pattern.
+- User ID generation uses `nextval('user_id_seq')` — atomic, no race condition.
 
 ## Agreed Graph Schema
 
-<!-- ============================================================
-  FILL THIS IN after your team agrees on Neo4j node labels and
-  relationship types.
-  ============================================================ -->
+### Node Labels
 
-Node labels:
+Every station node carries **two labels**: a shared `:Station` label (for cross-network queries) plus a network-specific label.
 
-```cypher
-MATCH (n) DETACH DELETE n;
+| Label | ID prefix | Properties |
+|---|---|---|
+| `:Station:MetroStation` | MS01–MS20 | `station_id`, `name` |
+| `:Station:NationalRailStation` | NR01–NR10 | `station_id`, `name` |
 
-CREATE CONSTRAINT station_id_unique IF NOT EXISTS
-FOR (s:Station) REQUIRE s.station_id IS UNIQUE;
+Constraint: `station_id` is unique across all `:Station` nodes.
 
-CREATE (:Station:MetroStation {station_id: "MS01", name: "Central Square"});
-CREATE (:Station:MetroStation {station_id: "MS02", name: "Riverside"});
-CREATE (:Station:MetroStation {station_id: "MS03", name: "Northgate"});
-CREATE (:Station:MetroStation {station_id: "MS04", name: "Elm Park"});
-CREATE (:Station:MetroStation {station_id: "MS05", name: "Westfield"});
-CREATE (:Station:MetroStation {station_id: "MS06", name: "Harbour View"});
-CREATE (:Station:MetroStation {station_id: "MS07", name: "Old Town"});
-CREATE (:Station:MetroStation {station_id: "MS08", name: "University"});
-CREATE (:Station:MetroStation {station_id: "MS09", name: "Queensbridge"});
-CREATE (:Station:MetroStation {station_id: "MS10", name: "Parkside"});
-CREATE (:Station:MetroStation {station_id: "MS11", name: "Greenhill"});
-CREATE (:Station:MetroStation {station_id: "MS12", name: "Lakeshore"});
-CREATE (:Station:MetroStation {station_id: "MS13", name: "Clifton"});
-CREATE (:Station:MetroStation {station_id: "MS14", name: "Eastwick"});
-CREATE (:Station:MetroStation {station_id: "MS15", name: "Ferndale"});
-CREATE (:Station:MetroStation {station_id: "MS16", name: "Hilltop"});
-CREATE (:Station:MetroStation {station_id: "MS17", name: "Broadmoor"});
-CREATE (:Station:MetroStation {station_id: "MS18", name: "Sunnyvale"});
-CREATE (:Station:MetroStation {station_id: "MS19", name: "Redwood"});
-CREATE (:Station:MetroStation {station_id: "MS20", name: "Thornton"});
+### Relationship Types
 
-CREATE (:Station:NationalRailStation {station_id: "NR01", name: "Central Station"});
-CREATE (:Station:NationalRailStation {station_id: "NR02", name: "Maplewood"});
-CREATE (:Station:NationalRailStation {station_id: "NR03", name: "Old Town Junction"});
-CREATE (:Station:NationalRailStation {station_id: "NR04", name: "Ashford"});
-CREATE (:Station:NationalRailStation {station_id: "NR05", name: "Stonehaven"});
-CREATE (:Station:NationalRailStation {station_id: "NR06", name: "Bridgeport"});
-CREATE (:Station:NationalRailStation {station_id: "NR07", name: "Ferndale Halt"});
-CREATE (:Station:NationalRailStation {station_id: "NR08", name: "Coalport"});
-CREATE (:Station:NationalRailStation {station_id: "NR09", name: "Dunmore"});
-CREATE (:Station:NationalRailStation {station_id: "NR10", name: "Langford End"});
+Three distinct relationship types are used — one per connection category. Do **not** collapse them into a single generic type; keeping them separate allows Dijkstra and path queries to target only metro, only rail, or both.
 
-MATCH (a:Station {station_id: "MS01"}), (b:Station {station_id: "MS05"})
-CREATE (a)-[:CONNECTS_TO {line: "M1", travel_time_min: 3}]->(b);
-MATCH (a:Station {station_id: "MS01"}), (b:Station {station_id: "MS02"})
-CREATE (a)-[:CONNECTS_TO {line: "M1", travel_time_min: 3}]->(b);
-MATCH (a:Station {station_id: "MS01"}), (b:Station {station_id: "MS06"})
-CREATE (a)-[:CONNECTS_TO {line: "M2", travel_time_min: 3}]->(b);
-MATCH (a:Station {station_id: "MS01"}), (b:Station {station_id: "MS07"})
-CREATE (a)-[:CONNECTS_TO {line: "M2", travel_time_min: 2}]->(b);
+| Relationship | Direction | Used between | Properties |
+|---|---|---|---|
+| `METRO_LINK` | directed (both ways) | MetroStation → MetroStation | `line` (e.g. "M1"), `travel_time_min` |
+| `RAIL_LINK` | directed (both ways) | NationalRailStation → NationalRailStation | `line` (e.g. "NR1"), `travel_time_min` |
+| `INTERCHANGE_TO` | directed (both ways) | MetroStation ↔ NationalRailStation | `walking_time_min` |
 
-MATCH (a:Station {station_id: "MS02"}), (b:Station {station_id: "MS01"})
-CREATE (a)-[:CONNECTS_TO {line: "M1", travel_time_min: 3}]->(b);
-MATCH (a:Station {station_id: "MS02"}), (b:Station {station_id: "MS03"})
-CREATE (a)-[:CONNECTS_TO {line: "M1", travel_time_min: 2}]->(b);
+All links are **bidirectional** (two separate directed edges, one each way).
 
-MATCH (a:Station {station_id: "MS03"}), (b:Station {station_id: "MS02"})
-CREATE (a)-[:CONNECTS_TO {line: "M1", travel_time_min: 2}]->(b);
-MATCH (a:Station {station_id: "MS03"}), (b:Station {station_id: "MS04"})
-CREATE (a)-[:CONNECTS_TO {line: "M1", travel_time_min: 4}]->(b);
+### Network Summary
 
-MATCH (a:Station {station_id: "MS04"}), (b:Station {station_id: "MS03"})
-CREATE (a)-[:CONNECTS_TO {line: "M1", travel_time_min: 4}]->(b);
-MATCH (a:Station {station_id: "MS04"}), (b:Station {station_id: "MS17"})
-CREATE (a)-[:CONNECTS_TO {line: "M1", travel_time_min: 3}]->(b);
-MATCH (a:Station {station_id: "MS04"}), (b:Station {station_id: "MS12"})
-CREATE (a)-[:CONNECTS_TO {line: "M3", travel_time_min: 3}]->(b);
+- **Metro lines**: M1, M2, M3, M4 — 20 stations (MS01–MS20)
+- **National Rail lines**: NR1, NR2 — 10 stations (NR01–NR10)
+- **Interchange points** (metro ↔ national rail, walking_time_min = 5):
+  - MS01 (Central Square) ↔ NR01 (Central Station)
+  - MS07 (Old Town) ↔ NR03 (Old Town Junction)
+  - MS15 (Ferndale) ↔ NR07 (Ferndale Halt)
 
-MATCH (a:Station {station_id: "MS05"}), (b:Station {station_id: "MS20"})
-CREATE (a)-[:CONNECTS_TO {line: "M1", travel_time_min: 2}]->(b);
-MATCH (a:Station {station_id: "MS05"}), (b:Station {station_id: "MS01"})
-CREATE (a)-[:CONNECTS_TO {line: "M1", travel_time_min: 3}]->(b);
+### Important Rules for AI Code Generation
 
-MATCH (a:Station {station_id: "MS06"}), (b:Station {station_id: "MS01"})
-CREATE (a)-[:CONNECTS_TO {line: "M2", travel_time_min: 3}]->(b);
+- Use `:Station` label (not `:MetroStation` or `:NationalRailStation`) when the query should work across both networks
+- Use `$param` syntax for all parameters — never string-format values into Cypher
+- `METRO_LINK` and `RAIL_LINK` are directional, but tracks are bidirectional — both directions exist as separate relationships in the graph
+- `INTERCHANGE_TO` also exists in both directions
+- `station_id` values in Neo4j match exactly the `station_id` values in PostgreSQL (e.g. `"MS01"` in Neo4j = `"MS01"` in the `metro_stations` table)
+- `network="auto"` means infer from station ID prefix — `MS` prefix → metro (use `METRO_LINK`), `NR` prefix → rail (use `RAIL_LINK`); if origin and destination are on different networks, use all three relationship types (`METRO_LINK|RAIL_LINK|INTERCHANGE_TO`)
 
-MATCH (a:Station {station_id: "MS07"}), (b:Station {station_id: "MS01"})
-CREATE (a)-[:CONNECTS_TO {line: "M2", travel_time_min: 2}]->(b);
-MATCH (a:Station {station_id: "MS07"}), (b:Station {station_id: "MS18"})
-CREATE (a)-[:CONNECTS_TO {line: "M2", travel_time_min: 2}]->(b);
-
-MATCH (a:Station {station_id: "MS08"}), (b:Station {station_id: "MS18"})
-CREATE (a)-[:CONNECTS_TO {line: "M2", travel_time_min: 4}]->(b);
-MATCH (a:Station {station_id: "MS08"}), (b:Station {station_id: "MS09"})
-CREATE (a)-[:CONNECTS_TO {line: "M2", travel_time_min: 3}]->(b);
-MATCH (a:Station {station_id: "MS08"}), (b:Station {station_id: "MS17"})
-CREATE (a)-[:CONNECTS_TO {line: "M4", travel_time_min: 4}]->(b);
-MATCH (a:Station {station_id: "MS08"}), (b:Station {station_id: "MS12"})
-CREATE (a)-[:CONNECTS_TO {line: "M4", travel_time_min: 4}]->(b);
-
-MATCH (a:Station {station_id: "MS09"}), (b:Station {station_id: "MS08"})
-CREATE (a)-[:CONNECTS_TO {line: "M2", travel_time_min: 3}]->(b);
-
-MATCH (a:Station {station_id: "MS10"}), (b:Station {station_id: "MS11"})
-CREATE (a)-[:CONNECTS_TO {line: "M3", travel_time_min: 2}]->(b);
-MATCH (a:Station {station_id: "MS10"}), (b:Station {station_id: "MS12"})
-CREATE (a)-[:CONNECTS_TO {line: "M3", travel_time_min: 4}]->(b);
-
-MATCH (a:Station {station_id: "MS11"}), (b:Station {station_id: "MS10"})
-CREATE (a)-[:CONNECTS_TO {line: "M3", travel_time_min: 2}]->(b);
-MATCH (a:Station {station_id: "MS11"}), (b:Station {station_id: "MS19"})
-CREATE (a)-[:CONNECTS_TO {line: "M3", travel_time_min: 3}]->(b);
-
-MATCH (a:Station {station_id: "MS12"}), (b:Station {station_id: "MS04"})
-CREATE (a)-[:CONNECTS_TO {line: "M3", travel_time_min: 3}]->(b);
-MATCH (a:Station {station_id: "MS12"}), (b:Station {station_id: "MS10"})
-CREATE (a)-[:CONNECTS_TO {line: "M3", travel_time_min: 4}]->(b);
-MATCH (a:Station {station_id: "MS12"}), (b:Station {station_id: "MS08"})
-CREATE (a)-[:CONNECTS_TO {line: "M4", travel_time_min: 4}]->(b);
-MATCH (a:Station {station_id: "MS12"}), (b:Station {station_id: "MS14"})
-CREATE (a)-[:CONNECTS_TO {line: "M4", travel_time_min: 4}]->(b);
-
-MATCH (a:Station {station_id: "MS13"}), (b:Station {station_id: "MS19"})
-CREATE (a)-[:CONNECTS_TO {line: "M3", travel_time_min: 2}]->(b);
-
-MATCH (a:Station {station_id: "MS14"}), (b:Station {station_id: "MS12"})
-CREATE (a)-[:CONNECTS_TO {line: "M4", travel_time_min: 4}]->(b);
-MATCH (a:Station {station_id: "MS14"}), (b:Station {station_id: "MS15"})
-CREATE (a)-[:CONNECTS_TO {line: "M4", travel_time_min: 2}]->(b);
-
-MATCH (a:Station {station_id: "MS15"}), (b:Station {station_id: "MS14"})
-CREATE (a)-[:CONNECTS_TO {line: "M4", travel_time_min: 2}]->(b);
-MATCH (a:Station {station_id: "MS15"}), (b:Station {station_id: "MS16"})
-CREATE (a)-[:CONNECTS_TO {line: "M4", travel_time_min: 3}]->(b);
-
-MATCH (a:Station {station_id: "MS16"}), (b:Station {station_id: "MS15"})
-CREATE (a)-[:CONNECTS_TO {line: "M4", travel_time_min: 3}]->(b);
-
-MATCH (a:Station {station_id: "MS17"}), (b:Station {station_id: "MS04"})
-CREATE (a)-[:CONNECTS_TO {line: "M1", travel_time_min: 3}]->(b);
-MATCH (a:Station {station_id: "MS17"}), (b:Station {station_id: "MS08"})
-CREATE (a)-[:CONNECTS_TO {line: "M4", travel_time_min: 4}]->(b);
-
-MATCH (a:Station {station_id: "MS18"}), (b:Station {station_id: "MS07"})
-CREATE (a)-[:CONNECTS_TO {line: "M2", travel_time_min: 2}]->(b);
-MATCH (a:Station {station_id: "MS18"}), (b:Station {station_id: "MS08"})
-CREATE (a)-[:CONNECTS_TO {line: "M2", travel_time_min: 4}]->(b);
-
-MATCH (a:Station {station_id: "MS19"}), (b:Station {station_id: "MS13"})
-CREATE (a)-[:CONNECTS_TO {line: "M3", travel_time_min: 2}]->(b);
-MATCH (a:Station {station_id: "MS19"}), (b:Station {station_id: "MS11"})
-CREATE (a)-[:CONNECTS_TO {line: "M3", travel_time_min: 3}]->(b);
-
-MATCH (a:Station {station_id: "MS20"}), (b:Station {station_id: "MS05"})
-CREATE (a)-[:CONNECTS_TO {line: "M1", travel_time_min: 2}]->(b);
-```
-
-Relationship types:
+### Example Cypher Pattern
 
 ```cypher
-MATCH (a:Station {station_id: "NR01"}), (b:Station {station_id: "NR02"})
-CREATE (a)-[:CONNECTS_TO {line: "NR1", travel_time_min: 12}]->(b);
-MATCH (a:Station {station_id: "NR01"}), (b:Station {station_id: "NR06"})
-CREATE (a)-[:CONNECTS_TO {line: "NR2", travel_time_min: 14}]->(b);
+// Fastest metro route (Dijkstra by travel_time_min)
+MATCH (start:MetroStation {station_id: $origin}),
+      (end:MetroStation {station_id: $destination})
+CALL apoc.algo.dijkstra(start, end, 'METRO_LINK', 'travel_time_min')
+YIELD path, weight
+RETURN path, weight AS total_time_min
 
-MATCH (a:Station {station_id: "NR02"}), (b:Station {station_id: "NR01"})
-CREATE (a)-[:CONNECTS_TO {line: "NR1", travel_time_min: 12}]->(b);
-MATCH (a:Station {station_id: "NR02"}), (b:Station {station_id: "NR03"})
-CREATE (a)-[:CONNECTS_TO {line: "NR1", travel_time_min: 18}]->(b);
-
-MATCH (a:Station {station_id: "NR03"}), (b:Station {station_id: "NR02"})
-CREATE (a)-[:CONNECTS_TO {line: "NR1", travel_time_min: 18}]->(b);
-MATCH (a:Station {station_id: "NR03"}), (b:Station {station_id: "NR04"})
-CREATE (a)-[:CONNECTS_TO {line: "NR1", travel_time_min: 15}]->(b);
-
-MATCH (a:Station {station_id: "NR04"}), (b:Station {station_id: "NR03"})
-CREATE (a)-[:CONNECTS_TO {line: "NR1", travel_time_min: 15}]->(b);
-MATCH (a:Station {station_id: "NR04"}), (b:Station {station_id: "NR05"})
-CREATE (a)-[:CONNECTS_TO {line: "NR1", travel_time_min: 20}]->(b);
-
-MATCH (a:Station {station_id: "NR05"}), (b:Station {station_id: "NR04"})
-CREATE (a)-[:CONNECTS_TO {line: "NR1", travel_time_min: 20}]->(b);
-
-MATCH (a:Station {station_id: "NR06"}), (b:Station {station_id: "NR01"})
-CREATE (a)-[:CONNECTS_TO {line: "NR2", travel_time_min: 14}]->(b);
-MATCH (a:Station {station_id: "NR06"}), (b:Station {station_id: "NR07"})
-CREATE (a)-[:CONNECTS_TO {line: "NR2", travel_time_min: 16}]->(b);
-
-MATCH (a:Station {station_id: "NR07"}), (b:Station {station_id: "NR06"})
-CREATE (a)-[:CONNECTS_TO {line: "NR2", travel_time_min: 16}]->(b);
-MATCH (a:Station {station_id: "NR07"}), (b:Station {station_id: "NR08"})
-CREATE (a)-[:CONNECTS_TO {line: "NR2", travel_time_min: 22}]->(b);
-
-MATCH (a:Station {station_id: "NR08"}), (b:Station {station_id: "NR07"})
-CREATE (a)-[:CONNECTS_TO {line: "NR2", travel_time_min: 22}]->(b);
-MATCH (a:Station {station_id: "NR08"}), (b:Station {station_id: "NR09"})
-CREATE (a)-[:CONNECTS_TO {line: "NR2", travel_time_min: 21}]->(b);
-
-MATCH (a:Station {station_id: "NR09"}), (b:Station {station_id: "NR08"})
-CREATE (a)-[:CONNECTS_TO {line: "NR2", travel_time_min: 21}]->(b);
-MATCH (a:Station {station_id: "NR09"}), (b:Station {station_id: "NR10"})
-CREATE (a)-[:CONNECTS_TO {line: "NR2", travel_time_min: 19}]->(b);
-
-MATCH (a:Station {station_id: "NR10"}), (b:Station {station_id: "NR09"})
-CREATE (a)-[:CONNECTS_TO {line: "NR2", travel_time_min: 19}]->(b);
-
-MATCH (a:Station {station_id: "MS01"}), (b:Station {station_id: "NR01"})
-CREATE (a)-[:INTERCHANGE_WITH {walking_time_min: 5}]->(b);
-MATCH (a:Station {station_id: "NR01"}), (b:Station {station_id: "MS01"})
-CREATE (a)-[:INTERCHANGE_WITH {walking_time_min: 5}]->(b);
-
-MATCH (a:Station {station_id: "MS07"}), (b:Station {station_id: "NR03"})
-CREATE (a)-[:INTERCHANGE_WITH {walking_time_min: 5}]->(b);
-MATCH (a:Station {station_id: "NR03"}), (b:Station {station_id: "MS07"})
-CREATE (a)-[:INTERCHANGE_WITH {walking_time_min: 5}]->(b);
-
-MATCH (a:Station {station_id: "MS15"}), (b:Station {station_id: "NR07"})
-CREATE (a)-[:INTERCHANGE_WITH {walking_time_min: 5}]->(b);
-MATCH (a:Station {station_id: "NR07"}), (b:Station {station_id: "MS15"})
-CREATE (a)-[:INTERCHANGE_WITH {walking_time_min: 5}]->(b);
-```
-
-Key properties:
-
-```cypher
-- TODO
+// Cross-network path (metro → interchange → rail)
+MATCH path = shortestPath(
+  (a:Station {station_id: $origin})-[:METRO_LINK|RAIL_LINK|INTERCHANGE_TO*]-(b:Station {station_id: $destination})
+)
+RETURN path
 ```
 
 ## Function Signatures We Are Implementing
@@ -501,11 +389,35 @@ def query_station_connections(station_id: str) -> list[dict]: ...
 
 ## Team Decisions Log
 
-<!-- Add entries as you make decisions. Format: "Decision: X. Why: Y." -->
+### Relational Schema
 
-- [ ] Schema design: TODO — add your table/column decisions here
-- [ ] Graph schema: TODO — add your node label and relationship type decisions here
-- [ ] (example) Metro schedule stop ordering: using `jsonb_array_elements` approach — easier to debug than containment operators
+| Decision | Reason |
+|---|---|
+| `stops_in_order` / `travel_time_from_origin` as JSONB | always read as a whole unit, no point splitting into rows |
+| `payments` / `feedback` exclusive-arc | two nullable FKs (`booking_id`, `metro_trip_id`) + CHECK so exactly one is set; PostgreSQL FK can't point at two tables so this is the workaround |
+| `users` and `user_credentials` separate | most queries only need profile info, no reason to expose password columns |
+| `bookings` (rail) and `metro_trips` (metro) separate | rail has seat assignment, metro has day_pass_ref, fields are too different to merge cleanly |
+| national rail fare as `std_*` / `first_*` columns | always exactly two classes, a join table would be overkill |
+| `user_id_seq` SEQUENCE for user IDs | atomic, avoids race condition from `SELECT MAX(user_id) + 1` |
+| `pg_advisory_xact_lock` in `register_user` | sequence handles ID but two threads can still race past the duplicate-email check; lock serialises the whole registration |
+| SERIALIZABLE isolation in `execute_booking` | seat check + insert must be atomic, works together with the partial unique index to block double-booking |
+| `secrets.choice` for ID generation | `random` is predictable, booking/payment IDs should be cryptographically random |
+| day-of-week stored lowercase ('mon', 'tue', ...) | `to_char(date, 'Dy')` returns title-case so queries use `lower()` when comparing; missed this initially and date-filtered queries returned nothing |
+| `day_of_week` CHECK constraint on both schedule_days tables | without it any string passes (e.g. 'xyz', 'MON'); CHECK limits to the 7 valid lowercase codes |
+| `ThreadedConnectionPool` (min=2, max=10) | one connection per request is too slow and hits DB limits; pool reuses connections, `_PooledConn` returns them on exit even if an exception happens |
+| email normalised with `.strip().lower()` | done at every entry point (register, login, reset) so "User@Email.COM" and "user@email.com" don't end up as separate accounts |
+| password length check (8–128) in Python | DB constraints don't give useful error messages; 128-char cap also prevents oversized-input attacks on argon2 |
+| argon2id for passwords and secret answers | OWASP recommended, memory-hard, both fields hashed so a DB dump doesn't leak anything usable |
+| single CTE for seat availability | original code did 2 extra queries per schedule (N+1); CTE computes seat totals and booking counts in one round-trip |
+
+### Graph Schema
+
+| Decision | Reason |
+|---|---|
+| three relationship types: `METRO_LINK`, `RAIL_LINK`, `INTERCHANGE_TO` | separate types let path queries target just metro, just rail, or both without property filtering; one generic type would need `WHERE` clauses everywhere |
+| two labels per node (`:Station` + network-specific) | `:Station` for cross-network queries, `:MetroStation` / `:NationalRailStation` for single-network ones |
+| bidirectional links as two directed edges | source data defines both directions anyway, and `apoc.algo.dijkstra` needs directed edges |
+| `walking_time_min = 5` for all interchanges | source data doesn't specify per-interchange times, using 5 min as placeholder |
 
 ## Prompts That Worked
 

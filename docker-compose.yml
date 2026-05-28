@@ -9,7 +9,7 @@ services:
       POSTGRES_PASSWORD: transitflow
       POSTGRES_DB: transitflow
     ports:
-      - "5433:5432"
+      - "5400:5432"
     volumes:
       - postgres_data_v2a:/var/lib/postgresql/data
       - ./databases/relational/schema.sql:/docker-entrypoint-initdb.d/init.sql
