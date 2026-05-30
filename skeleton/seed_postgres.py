@@ -55,6 +55,24 @@ def insert_many(cur, table, columns, rows):
     return cur.rowcount
 
 
+def _split_ref(ref):
+    """Map a raw 'booking_id' field (which may hold a BK or MT reference)
+    to the correct (booking_id, metro_trip_id) pair for INSERT.
+
+    payments.json and feedback.json both use a single 'booking_id' field
+    that holds either a national-rail booking ID (BK*) or a metro trip ID (MT*).
+    This helper splits it into the two nullable FK columns used in the schema.
+    """
+    if not ref:
+        return None, None
+    ref = str(ref)
+    if ref.startswith("BK"):
+        return ref, None   # → (booking_id, metro_trip_id)
+    if ref.startswith("MT"):
+        return None, ref   # → (booking_id, metro_trip_id)
+    return ref, None       # fallback: treat as booking_id
+
+
 # ── seeders ──────────────────────────────────────────────────────────────────
 
 def seed_metro_stations(cur):
@@ -294,10 +312,13 @@ def seed_national_rail_bookings(cur):
 def seed_metro_travels(cur):
     data = load("metro_travel_history.json")
 
+    # First pass: insert all rows with day_pass_ref = None.
+    # day_pass_ref is a self-referencing FK — inserting with a value before the
+    # referenced row exists would raise a FK violation.
     rows = [
         (t["trip_id"], t["user_id"], t["schedule_id"],
          t["origin_station_id"], t["destination_station_id"],
-         t["travel_date"], t["ticket_type"], t.get("day_pass_ref"),
+         t["travel_date"], t["ticket_type"], None,
          t.get("stops_travelled"), t["amount_usd"], t["status"],
          t.get("purchased_at"), t.get("travelled_at"))
         for t in data
@@ -311,18 +332,27 @@ def seed_metro_travels(cur):
                     rows)
     print(f"  metro_trips: {n} rows")
 
+    # Second pass: restore day_pass_ref self-references now that all rows exist.
+    updated = 0
+    for t in data:
+        if t.get("day_pass_ref"):
+            cur.execute(
+                "UPDATE metro_trips SET day_pass_ref = %s WHERE trip_id = %s",
+                (t["day_pass_ref"], t["trip_id"]),
+            )
+            updated += cur.rowcount
+    if updated:
+        print(f"  metro_trips day_pass_ref: {updated} rows updated")
+
 
 def seed_payments(cur):
     data = load("payments.json")
 
     rows = []
     for p in data:
-        bid = p["booking_id"]
-        # BK* → national rail booking; MT* → metro trip
-        if bid.startswith("BK"):
-            rows.append((p["payment_id"], bid, None, p["amount_usd"], p["method"], p["status"], p["paid_at"]))
-        else:
-            rows.append((p["payment_id"], None, bid, p["amount_usd"], p["method"], p["status"], p["paid_at"]))
+        booking_id, metro_trip_id = _split_ref(p["booking_id"])
+        rows.append((p["payment_id"], booking_id, metro_trip_id,
+                     p["amount_usd"], p["method"], p["status"], p["paid_at"]))
     n = insert_many(cur, "payments",
                     ["payment_id", "booking_id", "metro_trip_id", "amount_usd", "method", "status", "paid_at"],
                     rows)
@@ -334,12 +364,9 @@ def seed_feedback(cur):
 
     rows = []
     for f in data:
-        bid = f["booking_id"]
-        # BK* → national rail booking; MT* → metro trip
-        if bid.startswith("BK"):
-            rows.append((f["feedback_id"], bid, None, f["user_id"], f["rating"], f.get("comment"), f["submitted_at"]))
-        else:
-            rows.append((f["feedback_id"], None, bid, f["user_id"], f["rating"], f.get("comment"), f["submitted_at"]))
+        booking_id, metro_trip_id = _split_ref(f["booking_id"])
+        rows.append((f["feedback_id"], booking_id, metro_trip_id,
+                     f["user_id"], f["rating"], f.get("comment"), f["submitted_at"]))
     n = insert_many(cur, "feedback",
                     ["feedback_id", "booking_id", "metro_trip_id", "user_id",
                      "rating", "comment", "submitted_at"],

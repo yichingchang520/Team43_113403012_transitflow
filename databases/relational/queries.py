@@ -27,6 +27,7 @@ import re
 import secrets
 import string
 from datetime import date, datetime, timezone
+from decimal import Decimal
 from typing import Optional
 
 import psycopg2
@@ -76,13 +77,16 @@ class _PooledConn:
                 cur.execute(...)
     """
 
-    def __init__(self, autocommit: bool = True) -> None:
+    def __init__(self, autocommit: bool = True, isolation_level: str | None = None) -> None:
         self._autocommit = autocommit
+        self._isolation_level = isolation_level
         self._conn: psycopg2.extensions.connection | None = None
 
     def __enter__(self) -> psycopg2.extensions.connection:
         self._conn = _get_pool().getconn()
         self._conn.autocommit = self._autocommit
+        if self._isolation_level:
+            self._conn.set_session(isolation_level=self._isolation_level)
         return self._conn
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -106,6 +110,21 @@ def _connect() -> _PooledConn:
     return _PooledConn(autocommit=True)
 
 
+def _connect_write() -> _PooledConn:
+    """Return a pooled write (autocommit=False) connection context manager.
+    Caller must call conn.commit() on success; rollback is automatic on exit.
+    """
+    return _PooledConn(autocommit=False)
+
+
+def _connect_serializable() -> _PooledConn:
+    """Return a SERIALIZABLE pooled connection.
+    Used for operations that require strict isolation (e.g. seat booking).
+    Caller must call conn.commit() on success.
+    """
+    return _PooledConn(autocommit=False, isolation_level="SERIALIZABLE")
+
+
 def _gen_booking_id() -> str:
     """Cryptographically random booking ID, e.g. 'BK-A3F9K2'."""
     return "BK-" + "".join(secrets.choice(_ID_CHARS) for _ in range(6))
@@ -114,6 +133,27 @@ def _gen_booking_id() -> str:
 def _gen_payment_id() -> str:
     """Cryptographically random payment ID, e.g. 'PM-X7Q2P1'."""
     return "PM-" + "".join(secrets.choice(_ID_CHARS) for _ in range(6))
+
+
+def _to_jsonable(row: dict) -> dict:
+    """Convert a RealDictCursor row to a JSON-serialisable dict.
+
+    Handles the three PostgreSQL types that json.dumps() cannot serialise:
+      Decimal → float  (avoids agent receiving "8.50" string instead of 8.5 number)
+      datetime / date / time → ISO-8601 string
+    All other types (bool, int, str, list, dict, None) pass through unchanged.
+    """
+    out: dict = {}
+    for k, v in row.items():
+        if v is None or isinstance(v, (bool, int, str, list, dict)):
+            out[k] = v
+        elif isinstance(v, Decimal):
+            out[k] = float(v)
+        elif hasattr(v, "isoformat"):  # datetime, date, time
+            out[k] = v.isoformat()
+        else:
+            out[k] = v
+    return out
 
 
 # ── Example ───────────────────────────────────────────────────────────────────
@@ -246,7 +286,7 @@ def query_national_rail_availability(
     with _connect() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(sql, params)
-            return [dict(r) for r in cur.fetchall()]
+            return [_to_jsonable(dict(r)) for r in cur.fetchall()]
 
 
 def query_national_rail_fare(
@@ -344,7 +384,7 @@ def query_metro_schedules(origin_id: str, destination_id: str) -> list[dict]:
     with _connect() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(sql, {"origin_id": origin_id, "destination_id": destination_id})
-            return [dict(r) for r in cur.fetchall()]
+            return [_to_jsonable(dict(r)) for r in cur.fetchall()]
 
 
 def query_metro_fare(schedule_id: str, stops_travelled: int) -> Optional[dict]:
@@ -426,7 +466,7 @@ def query_available_seats(
                 "travel_date": travel_date,
                 "fare_class":  fare_class,
             })
-            return [dict(r) for r in cur.fetchall()]
+            return [_to_jsonable(dict(r)) for r in cur.fetchall()]
 
 
 def auto_select_adjacent_seats(available_seats: list[dict], count: int) -> list[str]:
@@ -472,7 +512,7 @@ def query_user_profile(user_email: str) -> Optional[dict]:
                 (user_email,),
             )
             row = cur.fetchone()
-            return dict(row) if row else None
+            return _to_jsonable(dict(row)) if row else None
 
 
 def query_user_bookings(user_email: str) -> dict:
@@ -506,7 +546,7 @@ def query_user_bookings(user_email: str) -> dict:
                 """,
                 (user_id,),
             )
-            nr_bookings = [dict(r) for r in cur.fetchall()]
+            nr_bookings = [_to_jsonable(dict(r)) for r in cur.fetchall()]
 
             # Metro trips
             cur.execute(
@@ -524,7 +564,7 @@ def query_user_bookings(user_email: str) -> dict:
                 """,
                 (user_id,),
             )
-            metro_trips = [dict(r) for r in cur.fetchall()]
+            metro_trips = [_to_jsonable(dict(r)) for r in cur.fetchall()]
 
             return {"national_rail": nr_bookings, "metro": metro_trips}
 
@@ -543,7 +583,7 @@ def query_payment_info(reference_id: str) -> Optional[dict]:
                 (reference_id, reference_id),
             )
             row = cur.fetchone()
-            return dict(row) if row else None
+            return _to_jsonable(dict(row)) if row else None
 
 
 # ── TRANSACTIONAL OPERATIONS ──────────────────────────────────────────────────
@@ -590,206 +630,198 @@ def execute_booking(
     if travel_date_obj < date.today():
         return False, "Travel date cannot be in the past"
 
-    conn = _get_pool().getconn()
-    conn.autocommit = False
-    conn.set_session(isolation_level="SERIALIZABLE")
-    try:
-        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            # 1. Validate user
-            cur.execute(
-                "SELECT user_id FROM users WHERE user_id = %s AND is_active = TRUE",
-                (user_id,),
-            )
-            if not cur.fetchone():
-                conn.rollback()
-                return False, "User not found or inactive"
-
-            # 1b. Check the schedule operates on the travel_date's day of week
-            cur.execute(
-                """
-                SELECT 1 FROM national_rail_schedule_days
-                WHERE schedule_id = %s
-                  AND day_of_week = lower(to_char(%s::date, 'Dy'))
-                """,
-                (schedule_id, travel_date),
-            )
-            if not cur.fetchone():
-                conn.rollback()
-                return False, "This schedule does not operate on that day of the week"
-
-            # 2. Get schedule — verify origin and destination appear in stops_in_order
-            #    in the correct order using LATERAL
-            cur.execute(
-                """
-                SELECT s.*,
-                       o_pos.pos::int AS origin_pos,
-                       d_pos.pos::int AS dest_pos
-                FROM national_rail_schedules s,
-                LATERAL (
-                    SELECT pos
-                    FROM jsonb_array_elements_text(s.stops_in_order)
-                         WITH ORDINALITY AS t(val, pos)
-                    WHERE val = %s
-                ) AS o_pos,
-                LATERAL (
-                    SELECT pos
-                    FROM jsonb_array_elements_text(s.stops_in_order)
-                         WITH ORDINALITY AS t(val, pos)
-                    WHERE val = %s
-                ) AS d_pos
-                WHERE s.schedule_id = %s
-                  AND o_pos.pos < d_pos.pos
-                """,
-                (origin_station_id, destination_station_id, schedule_id),
-            )
-            schedule = cur.fetchone()
-            if not schedule:
-                conn.rollback()
-                return False, "Schedule not found, or origin/destination not valid for this route"
-
-            stops_travelled = schedule["dest_pos"] - schedule["origin_pos"]
-
-            # 3. Calculate fare
-            if fare_class == "first":
-                base = float(schedule["first_base_fare_usd"])
-                rate = float(schedule["first_per_stop_rate_usd"])
-            else:
-                base = float(schedule["std_base_fare_usd"])
-                rate = float(schedule["std_per_stop_rate_usd"])
-            amount = round(base + rate * stops_travelled, 2)
-
-            # 4. Seat selection
-            if seat_id.lower() == "any":
-                cur.execute(
-                    """
-                    SELECT se.seat_id, co.coach
-                    FROM seat_layouts sl
-                    JOIN coaches co ON co.layout_id = sl.layout_id
-                                   AND co.fare_class = %s
-                    JOIN seats   se ON se.coach_id   = co.coach_id
-                    WHERE sl.schedule_id = %s
-                      AND NOT EXISTS (
-                          SELECT 1 FROM bookings b
-                          WHERE b.schedule_id = %s
-                            AND b.travel_date  = %s
-                            AND b.coach        = co.coach
-                            AND b.seat_id      = se.seat_id
-                            AND b.status NOT IN ('cancelled')
-                      )
-                    ORDER BY se.row_num, se.col_letter
-                    LIMIT 1
-                    """,
-                    (fare_class, schedule_id, schedule_id, travel_date),
-                )
-                seat_row = cur.fetchone()
-                if not seat_row:
-                    conn.rollback()
-                    return False, "No available seats for this schedule and date"
-                chosen_seat  = seat_row["seat_id"]
-                chosen_coach = seat_row["coach"]
-            else:
-                # Verify the seat exists in the right class
-                cur.execute(
-                    """
-                    SELECT se.seat_id, co.coach
-                    FROM seat_layouts sl
-                    JOIN coaches co ON co.layout_id = sl.layout_id
-                                   AND co.fare_class = %s
-                    JOIN seats   se ON se.coach_id   = co.coach_id
-                    WHERE sl.schedule_id = %s AND se.seat_id = %s
-                    """,
-                    (fare_class, schedule_id, seat_id),
-                )
-                seat_row = cur.fetchone()
-                if not seat_row:
-                    conn.rollback()
-                    return False, f"Seat '{seat_id}' not found in {fare_class} class for this schedule"
-
-                # Check it is not already booked
-                cur.execute(
-                    """
-                    SELECT 1 FROM bookings
-                    WHERE schedule_id = %s
-                      AND travel_date  = %s
-                      AND coach        = %s
-                      AND seat_id      = %s
-                      AND status NOT IN ('cancelled')
-                    """,
-                    (schedule_id, travel_date, seat_row["coach"], seat_id),
-                )
-                if cur.fetchone():
-                    conn.rollback()
-                    return False, f"Seat '{seat_id}' is already booked for {travel_date}"
-
-                chosen_seat  = seat_row["seat_id"]
-                chosen_coach = seat_row["coach"]
-
-            # 5. Generate IDs and insert
-            booking_id     = _gen_booking_id()
-            payment_id     = _gen_payment_id()
-            booked_at      = datetime.now(timezone.utc)
-            departure_time = schedule["first_train_time"]
-
-            cur.execute(
-                """
-                INSERT INTO bookings (
-                    booking_id, user_id, schedule_id,
-                    origin_station_id, destination_station_id,
-                    travel_date, departure_time,
-                    ticket_type, fare_class,
-                    coach, seat_id, stops_travelled,
-                    amount_usd, status, booked_at
-                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                """,
-                (
-                    booking_id, user_id, schedule_id,
-                    origin_station_id, destination_station_id,
-                    travel_date, departure_time,
-                    ticket_type, fare_class,
-                    chosen_coach, chosen_seat, stops_travelled,
-                    amount, "confirmed", booked_at,
-                ),
-            )
-
-            cur.execute(
-                """
-                INSERT INTO payments (payment_id, booking_id, metro_trip_id, amount_usd, method, status, paid_at)
-                VALUES (%s, %s, NULL, %s, %s, %s, %s)
-                """,
-                (payment_id, booking_id, amount, payment_method, "paid", booked_at),
-            )
-
-            conn.commit()
-            return True, {
-                "booking_id":              booking_id,
-                "payment_id":              payment_id,
-                "user_id":                 user_id,
-                "schedule_id":             schedule_id,
-                "origin_station_id":       origin_station_id,
-                "destination_station_id":  destination_station_id,
-                "travel_date":             travel_date,
-                "departure_time":          str(departure_time),
-                "fare_class":              fare_class,
-                "ticket_type":             ticket_type,
-                "coach":                   chosen_coach,
-                "seat_id":                 chosen_seat,
-                "stops_travelled":         stops_travelled,
-                "amount_usd":              amount,
-                "status":                  "confirmed",
-                "booked_at":               booked_at.isoformat(),
-            }
-    except psycopg2.errors.SerializationFailure:
-        conn.rollback()
-        return False, "Booking failed due to concurrent conflict. Please try again."
-    except Exception as e:
-        conn.rollback()
-        return False, str(e)
-    finally:
+    with _connect_serializable() as conn:
         try:
-            conn.autocommit = True
-            _get_pool().putconn(conn)
-        except Exception:
-            _get_pool().putconn(conn, close=True)
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                # 1. Validate user
+                cur.execute(
+                    "SELECT user_id FROM users WHERE user_id = %s AND is_active = TRUE",
+                    (user_id,),
+                )
+                if not cur.fetchone():
+                    conn.rollback()
+                    return False, "User not found or inactive"
+
+                # 1b. Check the schedule operates on the travel_date's day of week
+                cur.execute(
+                    """
+                    SELECT 1 FROM national_rail_schedule_days
+                    WHERE schedule_id = %s
+                      AND day_of_week = lower(to_char(%s::date, 'Dy'))
+                    """,
+                    (schedule_id, travel_date),
+                )
+                if not cur.fetchone():
+                    conn.rollback()
+                    return False, "This schedule does not operate on that day of the week"
+
+                # 2. Get schedule — verify origin and destination appear in stops_in_order
+                #    in the correct order using LATERAL
+                cur.execute(
+                    """
+                    SELECT s.*,
+                           o_pos.pos::int AS origin_pos,
+                           d_pos.pos::int AS dest_pos
+                    FROM national_rail_schedules s,
+                    LATERAL (
+                        SELECT pos
+                        FROM jsonb_array_elements_text(s.stops_in_order)
+                             WITH ORDINALITY AS t(val, pos)
+                        WHERE val = %s
+                    ) AS o_pos,
+                    LATERAL (
+                        SELECT pos
+                        FROM jsonb_array_elements_text(s.stops_in_order)
+                             WITH ORDINALITY AS t(val, pos)
+                        WHERE val = %s
+                    ) AS d_pos
+                    WHERE s.schedule_id = %s
+                      AND o_pos.pos < d_pos.pos
+                    """,
+                    (origin_station_id, destination_station_id, schedule_id),
+                )
+                schedule = cur.fetchone()
+                if not schedule:
+                    conn.rollback()
+                    return False, "Schedule not found, or origin/destination not valid for this route"
+
+                stops_travelled = schedule["dest_pos"] - schedule["origin_pos"]
+
+                # 3. Calculate fare
+                if fare_class == "first":
+                    base = float(schedule["first_base_fare_usd"])
+                    rate = float(schedule["first_per_stop_rate_usd"])
+                else:
+                    base = float(schedule["std_base_fare_usd"])
+                    rate = float(schedule["std_per_stop_rate_usd"])
+                amount = round(base + rate * stops_travelled, 2)
+
+                # 4. Seat selection
+                if seat_id.lower() == "any":
+                    cur.execute(
+                        """
+                        SELECT se.seat_id, co.coach
+                        FROM seat_layouts sl
+                        JOIN coaches co ON co.layout_id = sl.layout_id
+                                       AND co.fare_class = %s
+                        JOIN seats   se ON se.coach_id   = co.coach_id
+                        WHERE sl.schedule_id = %s
+                          AND NOT EXISTS (
+                              SELECT 1 FROM bookings b
+                              WHERE b.schedule_id = %s
+                                AND b.travel_date  = %s
+                                AND b.coach        = co.coach
+                                AND b.seat_id      = se.seat_id
+                                AND b.status NOT IN ('cancelled')
+                          )
+                        ORDER BY se.row_num, se.col_letter
+                        LIMIT 1
+                        """,
+                        (fare_class, schedule_id, schedule_id, travel_date),
+                    )
+                    seat_row = cur.fetchone()
+                    if not seat_row:
+                        conn.rollback()
+                        return False, "No available seats for this schedule and date"
+                    chosen_seat  = seat_row["seat_id"]
+                    chosen_coach = seat_row["coach"]
+                else:
+                    # Verify the seat exists in the right class
+                    cur.execute(
+                        """
+                        SELECT se.seat_id, co.coach
+                        FROM seat_layouts sl
+                        JOIN coaches co ON co.layout_id = sl.layout_id
+                                       AND co.fare_class = %s
+                        JOIN seats   se ON se.coach_id   = co.coach_id
+                        WHERE sl.schedule_id = %s AND se.seat_id = %s
+                        """,
+                        (fare_class, schedule_id, seat_id),
+                    )
+                    seat_row = cur.fetchone()
+                    if not seat_row:
+                        conn.rollback()
+                        return False, f"Seat '{seat_id}' not found in {fare_class} class for this schedule"
+
+                    # Check it is not already booked
+                    cur.execute(
+                        """
+                        SELECT 1 FROM bookings
+                        WHERE schedule_id = %s
+                          AND travel_date  = %s
+                          AND coach        = %s
+                          AND seat_id      = %s
+                          AND status NOT IN ('cancelled')
+                        """,
+                        (schedule_id, travel_date, seat_row["coach"], seat_id),
+                    )
+                    if cur.fetchone():
+                        conn.rollback()
+                        return False, f"Seat '{seat_id}' is already booked for {travel_date}"
+
+                    chosen_seat  = seat_row["seat_id"]
+                    chosen_coach = seat_row["coach"]
+
+                # 5. Generate IDs and insert
+                booking_id     = _gen_booking_id()
+                payment_id     = _gen_payment_id()
+                booked_at      = datetime.now(timezone.utc)
+                departure_time = schedule["first_train_time"]
+
+                cur.execute(
+                    """
+                    INSERT INTO bookings (
+                        booking_id, user_id, schedule_id,
+                        origin_station_id, destination_station_id,
+                        travel_date, departure_time,
+                        ticket_type, fare_class,
+                        coach, seat_id, stops_travelled,
+                        amount_usd, status, booked_at
+                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    """,
+                    (
+                        booking_id, user_id, schedule_id,
+                        origin_station_id, destination_station_id,
+                        travel_date, departure_time,
+                        ticket_type, fare_class,
+                        chosen_coach, chosen_seat, stops_travelled,
+                        amount, "confirmed", booked_at,
+                    ),
+                )
+
+                cur.execute(
+                    """
+                    INSERT INTO payments (payment_id, booking_id, metro_trip_id, amount_usd, method, status, paid_at)
+                    VALUES (%s, %s, NULL, %s, %s, %s, %s)
+                    """,
+                    (payment_id, booking_id, amount, payment_method, "paid", booked_at),
+                )
+
+                conn.commit()
+                return True, {
+                    "booking_id":              booking_id,
+                    "payment_id":              payment_id,
+                    "user_id":                 user_id,
+                    "schedule_id":             schedule_id,
+                    "origin_station_id":       origin_station_id,
+                    "destination_station_id":  destination_station_id,
+                    "travel_date":             travel_date,
+                    "departure_time":          str(departure_time),
+                    "fare_class":              fare_class,
+                    "ticket_type":             ticket_type,
+                    "coach":                   chosen_coach,
+                    "seat_id":                 chosen_seat,
+                    "stops_travelled":         stops_travelled,
+                    "amount_usd":              amount,
+                    "status":                  "confirmed",
+                    "booked_at":               booked_at.isoformat(),
+                }
+        except psycopg2.errors.SerializationFailure:
+            conn.rollback()
+            return False, "Booking failed due to concurrent conflict. Please try again."
+        except Exception as e:
+            conn.rollback()
+            return False, str(e)
 
 
 def execute_cancellation(booking_id: str, user_id: str) -> tuple[bool, dict | str]:
@@ -808,97 +840,90 @@ def execute_cancellation(booking_id: str, user_id: str) -> tuple[bool, dict | st
         (True, result_dict)  with refund_amount_usd and policy note
         (False, error_msg)
     """
-    conn = _get_pool().getconn()
-    conn.autocommit = False
-    try:
-        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute(
-                """
-                SELECT b.*, s.service_type
-                FROM bookings b
-                JOIN national_rail_schedules s ON s.schedule_id = b.schedule_id
-                WHERE b.booking_id = %s AND b.user_id = %s
-                """,
-                (booking_id, user_id),
-            )
-            booking = cur.fetchone()
-            if not booking:
-                conn.rollback()
-                return False, "Booking not found or does not belong to this user"
-
-            if booking["status"] == "cancelled":
-                conn.rollback()
-                return False, "Booking is already cancelled"
-            if booking["status"] == "completed":
-                conn.rollback()
-                return False, "Cannot cancel a completed journey"
-
-            # Hours until departure (treat stored times as UTC)
-            travel_dt = datetime.combine(
-                booking["travel_date"], booking["departure_time"]
-            ).replace(tzinfo=timezone.utc)
-            hours_until = (travel_dt - datetime.now(timezone.utc)).total_seconds() / 3600
-
-            service_type = (booking["service_type"] or "normal").lower()
-
-            if service_type == "express":
-                # RF002: 100% > 72 h | 50% 3–72 h | 0% < 3 h
-                if hours_until > 72:
-                    refund_pct   = 1.0
-                    policy_note  = "RF002: Full refund (>72 h before departure)"
-                elif hours_until > 3:
-                    refund_pct   = 0.5
-                    policy_note  = "RF002: 50% refund (3–72 h before departure)"
-                else:
-                    refund_pct   = 0.0
-                    policy_note  = "RF002: No refund (<3 h before departure)"
-            else:
-                # RF001: 100% > 72 h | 75% 24–72 h | 50% 3–24 h | 0% < 3 h
-                if hours_until > 72:
-                    refund_pct   = 1.0
-                    policy_note  = "RF001: Full refund (>72 h before departure)"
-                elif hours_until > 24:
-                    refund_pct   = 0.75
-                    policy_note  = "RF001: 75% refund (24–72 h before departure)"
-                elif hours_until > 3:
-                    refund_pct   = 0.5
-                    policy_note  = "RF001: 50% refund (3–24 h before departure)"
-                else:
-                    refund_pct   = 0.0
-                    policy_note  = "RF001: No refund (<3 h before departure)"
-
-            refund_amount = round(float(booking["amount_usd"]) * refund_pct, 2)
-
-            cur.execute(
-                "UPDATE bookings SET status = 'cancelled' WHERE booking_id = %s",
-                (booking_id,),
-            )
-
-            # Update payment status: refunded if money is returned, else keep as paid
-            payment_status = "refunded" if refund_amount > 0 else "paid"
-            cur.execute(
-                "UPDATE payments SET status = %s WHERE booking_id = %s",
-                (payment_status, booking_id),
-            )
-
-            conn.commit()
-            return True, {
-                "booking_id":          booking_id,
-                "original_amount_usd": float(booking["amount_usd"]),
-                "refund_amount_usd":   refund_amount,
-                "refund_percentage":   int(refund_pct * 100),
-                "policy_note":         policy_note,
-                "status":              "cancelled",
-            }
-    except Exception as e:
-        conn.rollback()
-        return False, str(e)
-    finally:
+    with _connect_write() as conn:
         try:
-            conn.autocommit = True
-            _get_pool().putconn(conn)
-        except Exception:
-            _get_pool().putconn(conn, close=True)
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT b.*, s.service_type
+                    FROM bookings b
+                    JOIN national_rail_schedules s ON s.schedule_id = b.schedule_id
+                    WHERE b.booking_id = %s AND b.user_id = %s
+                    """,
+                    (booking_id, user_id),
+                )
+                booking = cur.fetchone()
+                if not booking:
+                    conn.rollback()
+                    return False, "Booking not found or does not belong to this user"
+
+                if booking["status"] == "cancelled":
+                    conn.rollback()
+                    return False, "Booking is already cancelled"
+                if booking["status"] == "completed":
+                    conn.rollback()
+                    return False, "Cannot cancel a completed journey"
+
+                # Hours until departure (treat stored times as UTC)
+                travel_dt = datetime.combine(
+                    booking["travel_date"], booking["departure_time"]
+                ).replace(tzinfo=timezone.utc)
+                hours_until = (travel_dt - datetime.now(timezone.utc)).total_seconds() / 3600
+
+                service_type = (booking["service_type"] or "normal").lower()
+
+                if service_type == "express":
+                    # RF002: 100% > 72 h | 50% 3–72 h | 0% < 3 h
+                    if hours_until > 72:
+                        refund_pct   = 1.0
+                        policy_note  = "RF002: Full refund (>72 h before departure)"
+                    elif hours_until > 3:
+                        refund_pct   = 0.5
+                        policy_note  = "RF002: 50% refund (3–72 h before departure)"
+                    else:
+                        refund_pct   = 0.0
+                        policy_note  = "RF002: No refund (<3 h before departure)"
+                else:
+                    # RF001: 100% > 72 h | 75% 24–72 h | 50% 3–24 h | 0% < 3 h
+                    if hours_until > 72:
+                        refund_pct   = 1.0
+                        policy_note  = "RF001: Full refund (>72 h before departure)"
+                    elif hours_until > 24:
+                        refund_pct   = 0.75
+                        policy_note  = "RF001: 75% refund (24–72 h before departure)"
+                    elif hours_until > 3:
+                        refund_pct   = 0.5
+                        policy_note  = "RF001: 50% refund (3–24 h before departure)"
+                    else:
+                        refund_pct   = 0.0
+                        policy_note  = "RF001: No refund (<3 h before departure)"
+
+                refund_amount = round(float(booking["amount_usd"]) * refund_pct, 2)
+
+                cur.execute(
+                    "UPDATE bookings SET status = 'cancelled' WHERE booking_id = %s",
+                    (booking_id,),
+                )
+
+                # Update payment status: refunded if money is returned, else keep as paid
+                payment_status = "refunded" if refund_amount > 0 else "paid"
+                cur.execute(
+                    "UPDATE payments SET status = %s WHERE booking_id = %s",
+                    (payment_status, booking_id),
+                )
+
+                conn.commit()
+                return True, {
+                    "booking_id":          booking_id,
+                    "original_amount_usd": float(booking["amount_usd"]),
+                    "refund_amount_usd":   refund_amount,
+                    "refund_percentage":   int(refund_pct * 100),
+                    "policy_note":         policy_note,
+                    "status":              "cancelled",
+                }
+        except Exception as e:
+            conn.rollback()
+            return False, str(e)
 
 
 # ── AUTHENTICATION QUERIES ────────────────────────────────────────────────────
@@ -929,58 +954,51 @@ def register_user(
     if len(password) > _PW_MAX_LEN:
         return False, f"Password must be at most {_PW_MAX_LEN} characters"
 
-    conn = _get_pool().getconn()
-    conn.autocommit = False
-    try:
-        with conn.cursor() as cur:
-            # Advisory lock: serialise concurrent registrations so two threads
-            # cannot both read the same MAX(user_id) and generate a duplicate.
-            cur.execute("SELECT pg_advisory_xact_lock(hashtext('register_user'))")
-
-            # Reject duplicate email
-            cur.execute("SELECT 1 FROM users WHERE email = %s", (email,))
-            if cur.fetchone():
-                conn.rollback()
-                return False, "Email is already registered"
-
-            # Atomic user ID generation via sequence — no race condition.
-            cur.execute(
-                "SELECT 'RU' || LPAD(nextval('user_id_seq')::text, 2, '0')"
-            )
-            new_user_id = cur.fetchone()[0]
-
-            dob = date(year_of_birth, 1, 1)
-
-            cur.execute(
-                """
-                INSERT INTO users
-                    (user_id, first_name, surname, email, date_of_birth, registered_at, is_active)
-                VALUES (%s, %s, %s, %s, %s, %s, TRUE)
-                """,
-                (new_user_id, first_name.strip(), surname.strip(),
-                 email, dob, datetime.now(timezone.utc)),
-            )
-            cur.execute(
-                """
-                INSERT INTO user_credentials
-                    (user_id, password_hash, secret_question, secret_answer)
-                VALUES (%s, %s, %s, %s)
-                """,
-                (new_user_id, _ph.hash(password), secret_question,
-                 _ph.hash(secret_answer.strip().lower()) if secret_answer else None),
-            )
-
-            conn.commit()
-            return True, new_user_id
-    except Exception as e:
-        conn.rollback()
-        return False, str(e)
-    finally:
+    with _connect_write() as conn:
         try:
-            conn.autocommit = True
-            _get_pool().putconn(conn)
-        except Exception:
-            _get_pool().putconn(conn, close=True)
+            with conn.cursor() as cur:
+                # Advisory lock: serialise concurrent registrations so two threads
+                # cannot both read the same MAX(user_id) and generate a duplicate.
+                cur.execute("SELECT pg_advisory_xact_lock(hashtext('register_user'))")
+
+                # Reject duplicate email
+                cur.execute("SELECT 1 FROM users WHERE email = %s", (email,))
+                if cur.fetchone():
+                    conn.rollback()
+                    return False, "Email is already registered"
+
+                # Atomic user ID generation via sequence — no race condition.
+                cur.execute(
+                    "SELECT 'RU' || LPAD(nextval('user_id_seq')::text, 2, '0')"
+                )
+                new_user_id = cur.fetchone()[0]
+
+                dob = date(year_of_birth, 1, 1)
+
+                cur.execute(
+                    """
+                    INSERT INTO users
+                        (user_id, first_name, surname, email, date_of_birth, registered_at, is_active)
+                    VALUES (%s, %s, %s, %s, %s, %s, TRUE)
+                    """,
+                    (new_user_id, first_name.strip(), surname.strip(),
+                     email, dob, datetime.now(timezone.utc)),
+                )
+                cur.execute(
+                    """
+                    INSERT INTO user_credentials
+                        (user_id, password_hash, secret_question, secret_answer)
+                    VALUES (%s, %s, %s, %s)
+                    """,
+                    (new_user_id, _ph.hash(password), secret_question,
+                     _ph.hash(secret_answer.strip().lower()) if secret_answer else None),
+                )
+
+                conn.commit()
+                return True, new_user_id
+        except Exception as e:
+            conn.rollback()
+            return False, str(e)
 
 
 def login_user(email: str, password: str) -> Optional[dict]:
@@ -1009,7 +1027,7 @@ def login_user(email: str, password: str) -> Optional[dict]:
                 _ph.verify(row["password_hash"], password)
             except (VerifyMismatchError, InvalidHashError):
                 return None
-            result = dict(row)
+            result = _to_jsonable(dict(row))
             result.pop("password_hash")
             return result
 
@@ -1064,7 +1082,7 @@ def update_password(email: str, new_password: str) -> bool:
     if not (_PW_MIN_LEN <= len(new_password) <= _PW_MAX_LEN):
         return False
 
-    with _connect() as conn:
+    with _connect_write() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -1075,7 +1093,9 @@ def update_password(email: str, new_password: str) -> bool:
                 """,
                 (_ph.hash(new_password), email.strip().lower()),
             )
-            return cur.rowcount > 0
+            updated = cur.rowcount > 0
+            conn.commit()
+            return updated
 
 
 # ── VECTOR / RAG QUERIES — do not modify ─────────────────────────────────────
