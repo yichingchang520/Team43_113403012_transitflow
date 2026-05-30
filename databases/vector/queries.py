@@ -4,7 +4,7 @@ from psycopg2.extras import RealDictCursor
 def get_db_connection():
     return psycopg2.connect(
         host="localhost",
-        port=5433,
+        port=5400,
         database="transitflow",
         user="transitflow",
         password="transitflow"
