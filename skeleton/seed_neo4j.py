@@ -40,22 +40,72 @@ def seed():
         session.run("MATCH (n) DETACH DELETE n")
         print("  Cleared existing graph data")
 
-        # TODO: Design your node labels and create metro station nodes.
-        # Each station has: station_id, name, lines, and interchange info.
-        # See metro_stations.json for the full data structure.
+        # 2. 建立地鐵站點 (MetroStation Nodes)
+        for s in metro_stations:
+            session.run(
+                "MERGE (n:MetroStation {station_id: $id}) "
+                "SET n.name = $name, n.lines = $lines",
+                id=s["station_id"],
+                name=s["name"],
+                lines=s.get("lines", [])
+            )
+        print(f"  Created {len(metro_stations)} MetroStation nodes")
 
-        # TODO: Design your node labels and create national rail station nodes.
-        # See national_rail_stations.json for the full data structure.
+        # 3. 建立國家鐵路站點 (NationalRailStation Nodes)
+        for s in rail_stations:
+            session.run(
+                "MERGE (n:NationalRailStation {station_id: $id}) "
+                "SET n.name = $name, n.lines = $lines",
+                id=s["station_id"],
+                name=s["name"],
+                lines=s.get("lines", [])
+            )
+        print(f"  Created {len(rail_stations)} NationalRailStation nodes")
 
-        # TODO: Design your relationship types and create metro links.
-        # Each station lists its adjacent_stations with line and travel_time_min.
-        # Consider what properties to store on the relationship.
+        # 4. 建立地鐵站點間的連線關係 (METRO_LINK Edges)
+        for s in metro_stations:
+            for adj in s.get("adjacent_stations", []):
+                session.run(
+                    "MATCH (a:MetroStation {station_id: $from_id}) "
+                    "MATCH (b:MetroStation {station_id: $to_id}) "
+                    "MERGE (a)-[r:METRO_LINK {line: $line}]->(b) "
+                    "SET r.travel_time_min = $time",
+                    from_id=s["station_id"],
+                    to_id=adj["station_id"],
+                    line=adj["line"],
+                    time=adj["travel_time_min"]
+                )
+        print("  Created METRO_LINK relationships")
 
-        # TODO: Design your relationship types and create national rail links.
+        # 5. 建立國家鐵路站點間的連線關係 (RAIL_LINK Edges)
+        for s in rail_stations:
+            for adj in s.get("adjacent_stations", []):
+                session.run(
+                    "MATCH (a:NationalRailStation {station_id: $from_id}) "
+                    "MATCH (b:NationalRailStation {station_id: $to_id}) "
+                    "MERGE (a)-[r:RAIL_LINK {line: $line}]->(b) "
+                    "SET r.travel_time_min = $time",
+                    from_id=s["station_id"],
+                    to_id=adj["station_id"],
+                    line=adj["line"],
+                    time=adj["travel_time_min"]
+                )
+        print("  Created RAIL_LINK relationships")
 
-        # TODO: Create interchange relationships between metro and rail stations.
-        # Interchange info is in the is_interchange_national_rail field
-        # of metro_stations.json.
+        # 6. 建立跨系統轉乘連線 (INTERCHANGE_TO Edges)
+        for s in metro_stations:
+            if s.get("is_interchange_national_rail"):
+                nr_id = s.get("interchange_national_rail_station_id")
+                if nr_id:
+                    session.run(
+                        "MATCH (m:MetroStation {station_id: $m_id}) "
+                        "MATCH (r:NationalRailStation {station_id: $r_id}) "
+                        "MERGE (m)-[:INTERCHANGE_TO]->(r) "
+                        "MERGE (r)-[:INTERCHANGE_TO]->(m)",
+                        m_id=s["station_id"],
+                        r_id=nr_id
+                    )
+        print("  Created INTERCHANGE_TO relationships")
 
     driver.close()
     print("\nNeo4j graph seeded successfully.")
