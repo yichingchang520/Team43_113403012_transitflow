@@ -44,7 +44,12 @@ def connect():
 
 
 def insert_many(cur, table, columns, rows):
-    """Bulk insert with ON CONFLICT DO NOTHING. Returns row count inserted."""
+    """Bulk insert with ON CONFLICT DO NOTHING.
+
+    Returns the number of rows actually inserted (skipped rows are not counted).
+    Note: when re-running the seeder, existing rows are silently skipped — this
+    is intentional so the script is safe to run multiple times without error.
+    """
     if not rows:
         return 0
     sql = (
@@ -214,21 +219,20 @@ def seed_seat_layouts(cur):
     seat_count = 0
     for layout in data:
         for coach in layout["coaches"]:
-            # Insert coach and retrieve its generated coach_id
+            # Upsert the coach row using ON CONFLICT DO UPDATE (no-op update).
+            # This ensures RETURNING always gives back the coach_id whether the
+            # row was just inserted or already existed — eliminating the extra
+            # SELECT fallback that would otherwise be needed with DO NOTHING.
             cur.execute(
-                "INSERT INTO coaches (layout_id, coach, fare_class) VALUES (%s, %s, %s) "
-                "ON CONFLICT (layout_id, coach) DO NOTHING RETURNING coach_id",
+                """
+                INSERT INTO coaches (layout_id, coach, fare_class) VALUES (%s, %s, %s)
+                ON CONFLICT (layout_id, coach)
+                    DO UPDATE SET fare_class = EXCLUDED.fare_class
+                RETURNING coach_id
+                """,
                 (layout["layout_id"], coach["coach"], coach["fare_class"]),
             )
-            result = cur.fetchone()
-            if result is None:
-                # Row already existed — fetch its id
-                cur.execute(
-                    "SELECT coach_id FROM coaches WHERE layout_id = %s AND coach = %s",
-                    (layout["layout_id"], coach["coach"]),
-                )
-                result = cur.fetchone()
-            coach_id = result[0]
+            coach_id = cur.fetchone()[0]
             coach_count += 1
 
             seat_rows = [
@@ -306,7 +310,7 @@ def seed_national_rail_bookings(cur):
                      "amount_usd", "status",
                      "booked_at", "travelled_at"],
                     rows)
-    print(f"  bookings: {n} rows")
+    print(f"  bookings: {n}/{len(rows)} rows inserted ({len(rows) - n} skipped)")
 
 
 def seed_metro_travels(cur):

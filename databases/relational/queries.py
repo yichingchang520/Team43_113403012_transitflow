@@ -23,6 +23,8 @@ are already implemented — do not modify them.
 from __future__ import annotations
 
 import json
+import logging
+import os
 import re
 import secrets
 import string
@@ -40,6 +42,8 @@ _ph = PasswordHasher()
 
 from skeleton.config import PG_DSN, VECTOR_TOP_K, VECTOR_SIMILARITY_THRESHOLD
 
+logger = logging.getLogger(__name__)
+
 # ── Email validation ──────────────────────────────────────────────────────────
 _EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
 
@@ -53,9 +57,16 @@ _ID_CHARS = string.ascii_uppercase + string.digits
 # ── Connection pool ───────────────────────────────────────────────────────────
 # One pool per process; lazily initialised on first use.
 # min=2 keeps warm connections alive; max=10 caps load on the DB server.
+# Values can be overridden via environment variables (useful in production where
+# multiple workers may share the database).
 _pool: _pg_pool.ThreadedConnectionPool | None = None
-_POOL_MIN = 2
-_POOL_MAX = 10
+_POOL_MIN = int(os.getenv("PG_POOL_MIN", "2"))
+_POOL_MAX = int(os.getenv("PG_POOL_MAX", "10"))
+
+# Maximum number of times execute_booking retries on SERIALIZABLE conflict.
+# Two concurrent requests for the same seat will collide; retrying resolves this
+# transparently without surfacing a technical error to the user.
+_BOOKING_MAX_RETRIES = 3
 
 
 def _get_pool() -> _pg_pool.ThreadedConnectionPool:
@@ -630,7 +641,11 @@ def execute_booking(
     if travel_date_obj < date.today():
         return False, "Travel date cannot be in the past"
 
-    with _connect_serializable() as conn:
+    # Retry loop: SERIALIZABLE transactions may fail when two requests race for
+    # the same seat. Retrying up to _BOOKING_MAX_RETRIES times resolves the
+    # conflict without surfacing a technical error to the user.
+    for _attempt in range(1, _BOOKING_MAX_RETRIES + 1):
+      with _connect_serializable() as conn:
         try:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                 # 1. Validate user
@@ -818,10 +833,25 @@ def execute_booking(
                 }
         except psycopg2.errors.SerializationFailure:
             conn.rollback()
-            return False, "Booking failed due to concurrent conflict. Please try again."
+            logger.warning(
+                "execute_booking serialization failure (attempt %d/%d): "
+                "user=%s schedule=%s date=%s",
+                _attempt, _BOOKING_MAX_RETRIES, user_id, schedule_id, travel_date,
+            )
+            # Continue to next attempt; if this was the last attempt, fall through
+            # to the return statement below the loop.
         except Exception as e:
             conn.rollback()
+            logger.error(
+                "execute_booking unexpected error: user=%s schedule=%s error=%s",
+                user_id, schedule_id, e, exc_info=True,
+            )
             return False, str(e)
+    # All retry attempts exhausted
+    return False, (
+        f"Booking failed after {_BOOKING_MAX_RETRIES} attempts due to high concurrent "
+        "demand. Please try again in a moment."
+    )
 
 
 def execute_cancellation(booking_id: str, user_id: str) -> tuple[bool, dict | str]:
@@ -923,6 +953,10 @@ def execute_cancellation(booking_id: str, user_id: str) -> tuple[bool, dict | st
                 }
         except Exception as e:
             conn.rollback()
+            logger.error(
+                "execute_cancellation unexpected error: booking=%s user=%s error=%s",
+                booking_id, user_id, e, exc_info=True,
+            )
             return False, str(e)
 
 
@@ -998,6 +1032,10 @@ def register_user(
                 return True, new_user_id
         except Exception as e:
             conn.rollback()
+            logger.error(
+                "register_user unexpected error: email=%s error=%s",
+                email, e, exc_info=True,
+            )
             return False, str(e)
 
 

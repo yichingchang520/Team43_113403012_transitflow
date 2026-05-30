@@ -170,5 +170,70 @@
       }
     ],
     "exclusions": "Delays caused by third-party events (extreme weather, security incidents, government directives, or passenger-caused incidents) are not eligible for compensation."
+  },
+  {
+    "policy_id": "RF005_SIMPLE",
+    "label": "Delay Compensation - Easy Reference",
+    "applies_to": {
+      "network_type": "all"
+    },
+    "content": "DELAY COMPENSATION SUMMARY: For delays of 30 to 59 minutes, you get 50% refund. For delays of 60 to 119 minutes, you get 100% refund. For delays of 120 minutes or more, you get 100% refund plus up to $10 for alternative transport. Claim within 28 days. Delays must be operator fault. Excludes weather, security, and passenger-caused delays.",
+    "summary": "30-59 min = 50% refund. 60-119 min = 100% refund. 120+ min = 100% refund + $10."
+  },
+  {
+    "policy_id": "RF006",
+    "label": "Planned Service Disruption – Engineering Works",
+    "applies_to": {
+      "network_type": "all",
+      "ticket_types": ["single", "return", "day_pass"]
+    },
+    "overview": "When a service is cancelled or significantly altered due to planned engineering works, passengers are entitled to a full refund or free rebooking. Planned disruptions are announced at least 7 days in advance via the app, website, and station notices.",
+    "refund_rules": [
+      {
+        "rule_id": "RF006_R1",
+        "condition": "Service fully cancelled by operator due to planned engineering works",
+        "entitlement": "100% full refund of the ticket price. No admin fee applied.",
+        "alternative": "Free rebooking on the next available service on the same route at no extra cost.",
+        "how_to_claim": "Request via the app under 'My Journeys → Disruption Refund', website, or customer service desk within 28 days of the original travel date."
+      },
+      {
+        "rule_id": "RF006_R2",
+        "condition": "Service operates via a replacement route and journey time increases by 30 minutes or more",
+        "entitlement": "50% refund of the affected leg's fare.",
+        "how_to_claim": "Submit claim via app under 'Disruptions' or contact customer service within 28 days."
+      },
+      {
+        "rule_id": "RF006_R3",
+        "condition": "Passenger chooses not to travel because of announced engineering works, but the service is still running",
+        "entitlement": "Refund subject to the standard cancellation policy (RF001 for normal service, RF002 for express). Engineering works announcements do not override the standard cancellation windows.",
+        "note": "If the service is still running, the standard policy applies regardless of the disruption announcement."
+      }
+    ],
+    "advance_notice": "Planned engineering works are announced at least 7 days in advance. Passengers with affected bookings receive an in-app notification and email automatically.",
+    "no_refund_cases": "No additional compensation is provided for inconvenience beyond the entitlements listed above."
+  },
+  {
+    "policy_id": "RF007",
+    "label": "Missed Connection – Operator-Caused Delay",
+    "applies_to": {
+      "network_type": "national_rail",
+      "ticket_types": ["single", "return"]
+    },
+    "overview": "If a passenger misses a connecting TransitFlow service because their incoming TransitFlow service was delayed, they are entitled to free rebooking and may be eligible for delay compensation.",
+    "rules": [
+      {
+        "rule_id": "RF007_R1",
+        "condition": "Passenger misses a connecting TransitFlow service because their incoming TransitFlow service was delayed by the operator",
+        "entitlement": "Free rebooking on the next available service to the original destination. No new ticket required.",
+        "how_to_claim": "Show original ticket and delay evidence to platform staff, or contact customer service within 24 hours of travel."
+      },
+      {
+        "rule_id": "RF007_R2",
+        "condition": "Missed connection results in a total end-to-end journey delay of 30 minutes or more at the final destination",
+        "entitlement": "Compensation under RF005 (Delay Compensation – All Networks) applies to the total delay, measured from the originally scheduled arrival time to actual arrival time at the final destination.",
+        "note": "Delay is measured end-to-end, not per leg."
+      }
+    ],
+    "exclusions": "This policy covers only connections between TransitFlow services. Missed connections to third-party transport (buses, taxis, other rail operators) are not covered."
   }
 ]

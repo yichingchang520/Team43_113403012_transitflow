@@ -111,5 +111,64 @@
     "lost_tickets": "Digital tickets can be retrieved via the app at any time using the booking reference. Passengers are advised to screenshot their QR code before travel in case of connectivity issues.",
     "customer_service": "Passengers with queries or complaints may contact customer service via the in-app chat, email, or station help desks. Response time is within 2 business days.",
     "dispute_resolution": "If a passenger disagrees with a refund decision, they may escalate the case to the customer service team within 14 days of the original decision."
+  },
+  "complaints_and_feedback": {
+    "overview": "TransitFlow is committed to resolving passenger complaints fairly and promptly. All complaints are acknowledged within 2 business days.",
+    "how_to_complain": {
+      "in_app": "Use the 'Help & Feedback' section in the app. Select the relevant booking or journey and describe the issue.",
+      "email": "Send a written complaint to customer service. Include your booking reference, travel date, and a clear description of the issue.",
+      "station_help_desk": "Speak to staff at any staffed station help desk. A written record will be created and a reference number issued."
+    },
+    "response_times": {
+      "acknowledgement": "Within 2 business days of receiving the complaint.",
+      "full_response": "Within 10 business days for straightforward cases. Complex cases (e.g. those requiring investigation) may take up to 20 business days; the passenger will be kept informed of progress."
+    },
+    "escalation": {
+      "internal": "If unsatisfied with the initial response, passengers may request escalation to a senior customer service manager within 14 days of receiving the first response.",
+      "external": "If a complaint remains unresolved after exhausting the internal process, passengers may refer the matter to the relevant independent transport ombudsman or regulatory body."
+    },
+    "compensation_for_poor_service": {
+      "goodwill_gesture": "In cases of significant service failure beyond standard delay compensation, TransitFlow may offer a goodwill gesture (e.g. travel credit or voucher) at the discretion of the customer service team.",
+      "not_automatic": "Goodwill gestures are not automatic and must be requested as part of a formal complaint. They are separate from the entitlements under the delay compensation (RF005) and disruption (RF006) policies."
+    }
+  },
+  "railcard_and_discount_cards": {
+    "overview": "TransitFlow offers discounted travel for eligible passengers through its railcard scheme. Railcards must be purchased in advance and carried during travel.",
+    "available_railcards": [
+      {
+        "name": "Senior Railcard",
+        "eligible_age": "60 and over",
+        "discount_percent": 30,
+        "applicable_to": ["national_rail"],
+        "fare_classes": ["standard"],
+        "price_usd": 30.00,
+        "validity_years": 1,
+        "peak_restriction": "No discount applies on national rail services departing before 09:30 Monday to Friday."
+      },
+      {
+        "name": "Youth Railcard",
+        "eligible_age": "16 to 25 (inclusive)",
+        "discount_percent": 30,
+        "applicable_to": ["national_rail"],
+        "fare_classes": ["standard"],
+        "price_usd": 30.00,
+        "validity_years": 1,
+        "peak_restriction": "No discount applies on national rail services departing before 09:30 Monday to Friday."
+      },
+      {
+        "name": "Family Railcard",
+        "eligible_group": "1–2 adults travelling with 1–4 children aged 5–15",
+        "adult_discount_percent": 30,
+        "child_discount_percent": 60,
+        "applicable_to": ["national_rail"],
+        "fare_classes": ["standard"],
+        "price_usd": 40.00,
+        "validity_years": 1,
+        "conditions": "At least one child must travel with the railcard holder at all times. The discount applies to all qualifying passengers in the same booking."
+      }
+    ],
+    "how_to_use": "Add your railcard to the app under 'My Railcards' before booking. The discount is applied automatically at checkout. You must carry the railcard (physical or digital) during travel — failure to show it when requested may result in a penalty fare.",
+    "lost_or_stolen": "Report a lost or stolen railcard via the app or customer service. A replacement can be issued for a $5.00 admin fee. Railcards cannot be transferred to another person.",
+    "not_applicable_to": ["metro services", "first class tickets", "advance bookings already made without the railcard applied"]
   }
 }

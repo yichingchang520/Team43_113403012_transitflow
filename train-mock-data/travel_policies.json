@@ -133,5 +133,73 @@
     ],
     "smoking_and_vaping": "Strictly prohibited on all train carriages and at all station platforms.",
     "conduct": "Passengers behaving in a manner that causes distress or danger to other passengers or staff may be removed from the train. In serious cases, the operator reserves the right to involve law enforcement."
+  },
+  "lost_property": {
+    "overview": "Items left on metro or national rail services are collected by on-board staff and handed to the Lost Property Office at the relevant terminus station.",
+    "reporting": {
+      "how_to_report": "Report lost items via the in-app 'Lost Property' form, website, or by calling customer service. Provide a description of the item, the service (schedule ID or line), travel date, and approximate time.",
+      "response_time": "The Lost Property Office will respond within 2 business days to confirm whether the item has been found."
+    },
+    "collection": {
+      "where": "Confirmed found items must be collected in person from the Lost Property Office at the terminus station. Items cannot be posted or forwarded.",
+      "id_required": true,
+      "id_note": "A valid photo ID matching the name on the booking is required to collect items.",
+      "collection_window_days": 28,
+      "unclaimed_items": "Items not collected within 28 days of notification will be donated to charity or disposed of in accordance with local regulations."
+    },
+    "valuables": {
+      "high_value_items": "High-value items (wallets, phones, laptops, jewellery) are stored securely in a locked cabinet. A handling fee of $2.00 applies for items valued over $50.00.",
+      "cash": "Cash found on board is held for 28 days. If unclaimed, it is donated to a registered charity."
+    },
+    "liability": "TransitFlow accepts no liability for lost, stolen, or damaged personal property on its services. Passengers are advised to keep valuables secure at all times."
+  },
+  "penalty_fares": {
+    "overview": "Travelling without a valid ticket, presenting a counterfeit ticket, or deliberately evading fare payment is a serious offence. Revenue Protection Officers (RPOs) conduct regular checks on all services.",
+    "what_counts_as_fare_evasion": [
+      "Boarding a national rail service without a valid ticket for the service, date, and fare class booked",
+      "Tapping in at a metro gate with another passenger's QR code or a screenshot of an already-used ticket",
+      "Tampering with or reproducing a ticket in any form",
+      "Travelling beyond the booked destination without purchasing an extension",
+      "Failing to pay the applicable fare when challenged by an RPO"
+    ],
+    "penalty_fare_amounts": {
+      "on_the_spot_penalty": {
+        "amount_usd": 50.00,
+        "condition": "Issued by an RPO when a passenger cannot produce a valid ticket on board",
+        "payment_deadline": "Must be paid within 21 days via the app, website, or customer service. Non-payment escalates to legal action.",
+        "discount_for_early_payment": "A 50% reduction applies if the penalty is paid within 7 days of issue."
+      },
+      "repeat_offenders": {
+        "note": "Passengers issued two or more penalty fares within a 12-month period may be referred to the operator's legal team for prosecution under applicable transport bylaws."
+      }
+    },
+    "appeal_process": {
+      "right_to_appeal": true,
+      "deadline_days": 14,
+      "how_to_appeal": "Submit an appeal via the in-app 'Penalty Fare Appeal' form or by writing to customer service within 14 days of the penalty issue date. Include your penalty reference number and supporting evidence.",
+      "outcome": "Appeals are reviewed within 10 business days. The outcome is final unless escalated through a formal dispute resolution body."
+    },
+    "genuine_mistakes": "Passengers who make a genuine ticketing mistake (e.g. boarding the wrong service, using an expired railcard) may be given the opportunity to purchase the correct ticket at the prevailing fare without a penalty, at the RPO's discretion."
+  },
+  "engineering_works": {
+    "overview": "Planned engineering works are essential maintenance activities that may require services to be suspended, rerouted, or replaced by alternative transport. TransitFlow gives passengers as much advance notice as possible.",
+    "notice_period": {
+      "standard": "At least 7 days advance notice for routine maintenance.",
+      "emergency": "Emergency engineering works (e.g. infrastructure failure) may proceed with shorter notice. Affected passengers are notified as soon as the scope is confirmed."
+    },
+    "how_passengers_are_informed": [
+      "In-app push notification sent directly to passengers with affected bookings",
+      "Email notification to the registered email address on the booking",
+      "Station and platform notices at all affected stations",
+      "Website service status page updated in real time",
+      "Social media announcements for major disruptions"
+    ],
+    "replacement_services": {
+      "bus_replacement": "Where practical, replacement bus services operate between affected stations. Check the app or website for specific bus stop locations — they may differ from the station entrance.",
+      "extended_journey_times": "Replacement bus services take longer than the rail equivalent. Allow extra time when making onward connections.",
+      "accessibility": "Replacement buses may not be fully accessible to all passengers. Passengers requiring accessible transport should contact customer service in advance so alternative arrangements can be made."
+    },
+    "refund_entitlements": "See RF006 (Planned Service Disruption – Engineering Works) for full refund and rebooking entitlements.",
+    "regular_schedule": "Engineering works are more common on weekends and public holidays when passenger numbers are lower. Check the service status page before travelling, particularly on Saturday nights and Sundays."
   }
 }
