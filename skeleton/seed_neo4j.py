@@ -13,7 +13,7 @@ Graph schema:
           :Station:NationalRailStation  {station_id, name}
   Edges : METRO_LINK     {line, travel_time_min}  MetroStation    → MetroStation
           RAIL_LINK      {line, travel_time_min}  NRStation       → NRStation
-          INTERCHANGE_TO {walking_time_min}        Metro ↔ NR (both directions)
+          INTERCHANGE_TO {walking_time_min, travel_time_min}  Metro ↔ NR (both directions)
 """
 
 import json
@@ -82,9 +82,6 @@ def seed():
         print(f"  Created {len(rail_stations)} NationalRailStation nodes")
 
         # ── 建立捷運路線連結 (METRO_LINK) ─────────────────────────────────────
-        # adjacent_stations 原始資料已包含雙向記錄，直接展開即可。
-        # 先在 Python 端整理成清單，再用 UNWIND 一次送入 Neo4j，
-        # 避免每條邊各自一次 session.run() 的 round-trip 成本。
         metro_links = [
             {
                 "from_id": s["station_id"],
@@ -132,7 +129,8 @@ def seed():
 
         # ── 建立換乘連結 (INTERCHANGE_TO) ─────────────────────────────────────
         # APOC Dijkstra 需要有向邊，因此捷運 ↔ 國鐵 各建一條方向相反的邊。
-        # walking_time_min 設為 5 分鐘（原始資料未提供各換乘站的步行時間）。
+        # walking_time_min：實際步行時間語意名稱
+        # travel_time_min：APOC Dijkstra 使用此屬性計算路徑權重，兩者都要設定
         interchange_pairs = [
             {
                 "metro_id": s["station_id"],
@@ -142,11 +140,6 @@ def seed():
             if s.get("is_interchange_national_rail")
             and s.get("interchange_national_rail_station_id")
         ]
-        # Both walking_time_min and travel_time_min are set on INTERCHANGE_TO edges.
-        # walking_time_min is the semantically correct name for on-foot transfers,
-        # but APOC Dijkstra uses travel_time_min as the weight property across all
-        # edge types. Setting both ensures the total journey time is calculated
-        # correctly when crossing the network boundary.
         session.run(
             """
             UNWIND $pairs AS p

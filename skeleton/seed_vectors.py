@@ -59,27 +59,31 @@ def build_documents():
             "content": _text(tt),
         })
 
-    # booking_rules.json — one document per network section
+    # booking_rules.json — one document per section (all sections, not just hardcoded ones)
+    # Skips metadata keys ("version", "last_updated") that aren't policy content.
+    _METADATA_KEYS = {"version", "last_updated"}
     br = _load("booking_rules.json")
-    for section in ("national_rail", "metro", "general_rules"):
-        if section in br:
-            docs.append({
-                "title": f"Booking Rules — {section.replace('_', ' ').title()}",
-                "category": "booking",
-                "source_file": "booking_rules.json",
-                "content": _text({section: br[section]}),
-            })
+    for section, content in br.items():
+        if section in _METADATA_KEYS:
+            continue
+        docs.append({
+            "title": f"Booking Rules — {section.replace('_', ' ').title()}",
+            "category": "booking",
+            "source_file": "booking_rules.json",
+            "content": _text({section: content}),
+        })
 
-    # travel_policies.json — one document per network section
+    # travel_policies.json — one document per section (all sections, not just hardcoded ones)
     tp = _load("travel_policies.json")
-    for section in ("metro", "national_rail"):
-        if section in tp:
-            docs.append({
-                "title": f"Travel Policies — {section.replace('_', ' ').title()}",
-                "category": "conduct",
-                "source_file": "travel_policies.json",
-                "content": _text({section: tp[section]}),
-            })
+    for section, content in tp.items():
+        if section in _METADATA_KEYS:
+            continue
+        docs.append({
+            "title": f"Travel Policies — {section.replace('_', ' ').title()}",
+            "category": "conduct",
+            "source_file": "travel_policies.json",
+            "content": _text({section: content}),
+        })
 
     return docs
 
