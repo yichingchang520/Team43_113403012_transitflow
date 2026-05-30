@@ -49,7 +49,10 @@ def chat(user_message: str, history_display: list, agent_history: list,
         )
         debug_text = ""
 
-    history_display = history_display + [[user_message, answer]]
+    history_display = history_display + [
+        {"role": "user",      "content": user_message},
+        {"role": "assistant", "content": answer},
+    ]
 
     debug_update = gr.update(value=debug_text, visible=show_debug)
     return history_display, new_agent_history, debug_update
