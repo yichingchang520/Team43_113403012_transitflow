@@ -1,0 +1,363 @@
+# TransitFlow 系統設計文件
+
+## 1. 系統總覽
+
+TransitFlow 是一個教學型的智能鐵路助理。使用者可以透過 Gradio 聊天介面詢問路線、班次、票價、座位、退票政策、延誤賠償，也可以在登入後查詢個人訂票紀錄、建立國鐵訂票或取消訂票。
+
+這個系統的核心設計不是把所有資料塞進同一個資料庫，而是依照資料特性拆成三種資料模型：
+
+- PostgreSQL 關聯式資料庫：處理結構化交易資料，例如使用者、車站、班次、座位、訂票、付款、意見回饋。
+- PostgreSQL + pgvector：處理政策文件的語意搜尋，也就是 RAG 檢索。
+- Neo4j 圖形資料庫：目標上用來表示捷運 / 國鐵實體網路，支援最短路徑、替代路線、跨網路轉乘和延誤影響分析。
+
+實際請求流程是：
+
+```mermaid
+flowchart TD
+    U[使用者] --> UI[Gradio 介面<br/>skeleton/ui.py]
+    UI --> A[智能代理<br/>skeleton/agent.py]
+    A --> LLM[LLM 提供者<br/>Ollama 或 Gemini]
+    A --> SQL[PostgreSQL 查詢<br/>databases/relational/queries.py]
+    A --> VEC[pgvector 政策搜尋<br/>policy_documents]
+    A --> G[Neo4j 查詢<br/>databases/graph/queries.py]
+    SQL --> PG[(PostgreSQL)]
+    VEC --> PG
+    G --> NEO[(Neo4j)]
+    PG --> A
+    NEO --> A
+    LLM --> A
+    A --> UI
+    UI --> U
+```
+
+重要現況：關聯式資料庫與向量檢索流程已經實作；Neo4j 種子資料載入器與圖形查詢函式目前仍是 TODO 骨架，因此圖形路線類問題在完整實作前會失敗或回傳錯誤。
+
+## 2. 需求
+
+### 功能需求
+
+系統應支援以下功能：
+
+- 公開查詢國鐵班次、服務類型、可用座位數與票價。
+- 公開查詢捷運班次與票價。
+- 公開查詢路線，例如最快路線、最便宜路線、替代路線、轉乘路徑。
+- 公開查詢政策，例如退款、延誤賠償、票種規則、行李、自行車、乘客行為規範。
+- 使用者註冊、登入、登出與忘記密碼重設。
+- 登入使用者可查詢自己的國鐵訂票與捷運旅程。
+- 登入使用者可建立國鐵訂票，包含指定座位或自動分配座位。
+- 登入使用者可取消訂票，系統根據退款政策邏輯更新訂票與付款狀態。
+- UI 可顯示除錯面板，讓學生看到工具選擇、資料庫原始結果和送給 LLM 的資料。
+
+### 非功能需求
+
+- 可理解性：專案主要用於資料庫與 AI 智能代理教學，設計應容易閱讀與擴充。
+- 資料一致性：訂票、付款、座位可用性必須避免重複訂位與交易狀態不一致。
+- 安全性：使用參數化 SQL；密碼與秘密答案使用 Argon2id hash；email 正規化。
+- 可重建性：資料庫狀態應能由資料表定義、種子資料腳本和 mock data 重新建立。
+- 可切換 LLM：聊天模型可使用 Ollama 或 Gemini；嵌入模型提供者必須與已載入的向量維度一致。
+- 可觀察性：除錯面板應幫助開發者理解 LLM 選了哪些工具與資料庫回傳什麼。
+
+## 3. 高階架構
+
+TransitFlow 分成四個主要層次：
+
+```mermaid
+flowchart LR
+    subgraph Presentation["展示層"]
+        UI["Gradio 聊天介面<br/>登入/註冊/除錯面板"]
+    end
+
+    subgraph Agent["智能代理層"]
+        Router["工具路由器<br/>LLM + 確定性備援規則"]
+        Exec["工具執行器"]
+        Normalizer["結果正規化器"]
+        Composer["答案生成器"]
+    end
+
+    subgraph DataAccess["資料存取層"]
+        RelQ["關聯式查詢"]
+        VecQ["向量搜尋"]
+        GraphQ["圖形查詢<br/>目前仍是 TODO"]
+    end
+
+    subgraph Storage["儲存層"]
+        PG["PostgreSQL<br/>關聯式資料表"]
+        PV["pgvector<br/>policy_documents"]
+        NEO["Neo4j<br/>車站圖"]
+    end
+
+    UI --> Router
+    Router --> Exec
+    Exec --> RelQ
+    Exec --> VecQ
+    Exec --> GraphQ
+    RelQ --> PG
+    VecQ --> PV
+    GraphQ --> NEO
+    Exec --> Normalizer
+    Normalizer --> Composer
+    Composer --> UI
+```
+
+### 執行與部署配置
+
+Python 應用程式在本機執行，並連到 Docker Compose 啟動的資料庫容器：
+
+| 服務 | 來源 | 主機 Port | 容器 Port | 用途 |
+|---|---|---:|---:|---|
+| Gradio 應用程式 | `skeleton/ui.py` | 7860 | n/a | 聊天介面 |
+| PostgreSQL + pgvector | `docker-compose.yml` | 5400 | 5432 | 關聯式與向量資料庫 |
+| Neo4j Browser | `docker-compose.yml` | 7475 | 7474 | 圖形資料庫視覺化介面 |
+| Neo4j Bolt | `docker-compose.yml` | 7688 | 7687 | Python Neo4j driver 連線 |
+| pgAdmin | `docker-compose.yml` | 5051 | 80 | PostgreSQL 瀏覽介面 |
+
+注意：`skeleton/config.py` 預設 `PG_PORT` 是 `5432`，`NEO4J_URI` 是 `bolt://localhost:7687`。如果從主機端使用目前的 `docker-compose.yml`，`.env` 應該對齊為 `PG_PORT=5400` 與 `NEO4J_URI=bolt://localhost:7688`，除非你的本機環境另有不同的連接埠對應。
+
+## 4. 核心元件
+
+### `skeleton/ui.py`
+
+這是 Gradio 前端，負責：
+
+- 聊天輸入框與回覆顯示。
+- 登入、註冊、登出與忘記密碼面板。
+- 目前使用者狀態。
+- 傳給智能代理的對話歷史狀態。
+- 除錯面板顯示。
+- 執行期間可切換 Ollama/Gemini 聊天模型的下拉選單。
+
+除了從 `databases/relational/queries.py` 匯入的驗證輔助函式之外，UI 不直接查詢應用資料。一般聊天訊息都會送進 `run_agent()`。
+
+### `skeleton/agent.py`
+
+這是系統的大腦，負責：
+
+- 車站名稱到 ID 的注入，讓像 "Central Station" 這類文字能轉成 `NR01`。
+- 工具定義，告訴 LLM 目前有哪些可執行動作。
+- 透過 Ollama 原生工具呼叫或 Gemini JSON 路由提示進行工具路由。
+- 對常見路線、班次與個人訂票查詢提供確定性備援規則。
+- 執行關聯式、向量與圖形查詢函式。
+- 將 JSON 結果正規化為可讀文字。
+- 由 LLM 生成最終回答。
+
+智能代理本身不應包含業務資料。它負責協調工具，並讓資料庫成為事實來源。
+
+### `databases/relational/queries.py`
+
+這是 PostgreSQL 資料存取層，使用 `psycopg2`、`RealDictCursor` 與 `ThreadedConnectionPool`。
+
+主要責任：
+
+- 國鐵可用班次與票價查詢。
+- 捷運班次與票價查詢。
+- 可用座位查詢與自動選位。
+- 使用者資料與訂票歷史。
+- 使用交易處理建立訂票。
+- 取消訂票並計算退款。
+- 註冊、登入與密碼重設。
+- 政策向量搜尋與政策文件儲存。
+
+寫入操作使用明確交易。建立訂票時依靠可序列化隔離層級與 partial unique index，避免同一班車、同一天、同一座位被重複訂走。
+
+### `databases/graph/queries.py`
+
+這是目標設計中的 Neo4j 資料存取層，應支援：
+
+- 依旅行時間尋找最快路線。
+- 依估算票價尋找最便宜路線。
+- 避開指定車站的替代路線。
+- 跨網路轉乘路徑。
+- 延誤影響範圍分析。
+- 直接相連車站查詢。
+
+目前狀態：函式簽名已存在，但實作仍會 raise `NotImplementedError`。因此文件或後續開發應把 Neo4j 查詢支援視為目標架構，而不是已完成行為。
+
+### 種子資料腳本
+
+種子資料腳本會從 git 追蹤的檔案重建本機資料：
+
+- `skeleton/seed_postgres.py`: 從 `train-mock-data/` 載入車站、班次、座位、使用者、訂票、旅程、付款與意見回饋資料。
+- `skeleton/seed_vectors.py`: 從 JSON 政策檔建立政策文件，使用已設定的 provider 產生 embedding，並存入 `policy_documents`。
+- `skeleton/seed_neo4j.py`: 目標上從車站 JSON 檔載入圖形節點與關係。目前狀態：仍包含 TODO 步驟，尚未真正建立圖形資料。
+
+## 5. 資料架構
+
+### PostgreSQL 關聯式資料
+
+`databases/relational/schema.sql` 內的關聯式 schema 用來描述營運資料。
+
+主要資料群組：
+
+- 使用者：`users`, `user_credentials`。
+- 捷運基礎資料：`metro_stations`, `metro_station_lines`, `metro_schedules`, `metro_schedule_days`。
+- 國鐵基礎資料：`national_rail_stations`, `national_rail_station_lines`, `national_rail_schedules`, `national_rail_schedule_days`。
+- 座位：`seat_layouts`, `coaches`, `seats`。
+- 交易：`bookings`, `metro_trips`, `payments`, `feedback`。
+
+重要設計選擇：
+
+- 捷運與國鐵旅程分開建模，因為國鐵有座位分配與預先訂票，捷運則偏向當日進站搭乘紀錄。
+- 付款與意見回饋使用互斥關聯：每一列只能指向國鐵訂票或捷運旅程其中之一，不能同時指向兩者。
+- 班次停靠順序與旅行時間以 JSONB 儲存，因為查詢通常會讀取整條有序路線。
+- partial unique index 會防止同一個 `schedule_id`、`travel_date`、`coach`、`seat_id` 發生活躍狀態下的重複訂位。
+
+### pgvector / RAG
+
+向量資料表是 `policy_documents`。
+
+政策資料來源：
+
+- `refund_policy.json`
+- `ticket_types.json`
+- `booking_rules.json`
+- `travel_policies.json`
+
+RAG 流程：
+
+```mermaid
+sequenceDiagram
+    participant User as 使用者
+    participant Agent as 智能代理
+    participant LLM as 嵌入模型提供者
+    participant Vec as pgvector policy_documents
+    participant Chat as 回答用 LLM
+
+    User->>Agent: 詢問政策或退款問題
+    Agent->>LLM: 將問題轉成嵌入向量
+    LLM-->>Agent: 回傳查詢嵌入向量
+    Agent->>Vec: 相似度搜尋
+    Vec-->>Agent: 最相關的政策文件
+    Agent->>Chat: 使用者問題 + 取回的政策文字
+    Chat-->>Agent: 有根據的最終回答
+```
+
+嵌入向量維度必須與提供者相符：
+
+- Ollama `nomic-embed-text`: `vector(768)`.
+- Gemini `gemini-embedding-001`: `vector(3072)`.
+
+目前 schema 使用 `vector(768)`，符合預設 Ollama 設定。
+
+### Neo4j 圖形資料
+
+目標圖形模型用來表示車站與實體連線：
+
+- `:Station:MetroStation` 節點表示 `MS01` 到 `MS20` 的捷運車站。
+- `:Station:NationalRailStation` 節點表示 `NR01` 到 `NR10` 的國鐵車站。
+- `METRO_LINK` 關係表示捷運車站之間的連線。
+- `RAIL_LINK` 關係表示國鐵車站之間的連線。
+- `INTERCHANGE_TO` 關係表示捷運與國鐵轉乘站之間的連線。
+
+關係屬性應包含乘車或步行時間，例如 `travel_time_min` 或 `walking_time_min`。
+
+目前狀態：這個 schema 已在 `AI_SESSION_CONTEXT.md` 中描述，但 `skeleton/seed_neo4j.py` 與 `databases/graph/queries.py` 仍需要實作。
+
+## 6. 主要使用者流程
+
+### 公開路線或票價查詢
+
+```mermaid
+sequenceDiagram
+    participant U as 使用者
+    participant UI as Gradio 介面
+    participant A as 智能代理
+    participant DB as 查詢層
+    participant L as LLM
+
+    U->>UI: 詢問路線、班次或票價問題
+    UI->>A: run_agent(message, history, current_user)
+    A->>L: 選擇工具
+    L-->>A: 工具呼叫
+    A->>DB: 執行選定查詢
+    DB-->>A: 結構化結果
+    A->>L: 使用結果生成回答
+    L-->>A: 最終回答
+    A-->>UI: 回答 + 更新後歷史
+    UI-->>U: 顯示回覆
+```
+
+對捷運票價來說，智能代理會先查捷運班次，計算起點到終點之間的站數，再呼叫捷運票價計算。
+
+對圖形路線查詢來說，目標流程會走 Neo4j。以目前實作狀態，必須等圖形查詢函式完成後才會完整運作。
+
+### 登入使用者訂票歷史
+
+1. 使用者透過 UI 登入。
+2. UI 將 `current_user_state` 存成使用者 email。
+3. 使用者詢問「顯示我的訂票」。
+4. 智能代理讀到登入狀態後呼叫 `get_user_bookings()`。
+5. `query_user_bookings(user_email)` 回傳國鐵訂票與捷運旅程。
+6. LLM 根據回傳紀錄寫出人類可讀的回答。
+
+### 國鐵訂票
+
+1. 使用者詢問旅程與日期。
+2. 智能代理在建立訂票前先檢查可用班次。
+3. 使用者確認訂票細節。
+4. 只有在使用者已登入時，智能代理才會呼叫 `make_booking`。
+5. `execute_booking()` 驗證路線、計算票價、選擇或驗證座位，並在同一個交易中寫入訂票與付款。
+6. 訂票結果回傳給使用者。
+
+### 政策 / 退款查詢
+
+1. 使用者詢問退款、賠償、行李、自行車、票種規則或乘客行為規範。
+2. 智能代理呼叫 `search_policy`。
+3. 目前的 LLM 提供者將使用者問題轉成嵌入向量。
+4. PostgreSQL pgvector 找出最相近的政策文件。
+5. 最終 LLM 回答會根據取回的政策文字生成。
+
+## 7. 目前實作狀態
+
+| 範圍 | 狀態 | 備註 |
+|---|---|---|
+| Gradio 介面 | 已實作 | 已有聊天、驗證面板、除錯面板與模型選擇。 |
+| Agent 路由器 | 已實作 | 已有 LLM 工具路由與確定性備援規則。 |
+| 關聯式 schema | 已實作 | `databases/relational/schema.sql` 定義營運 schema 與向量資料表。 |
+| PostgreSQL 種子資料載入 | 已實作 | `skeleton/seed_postgres.py` 會載入 mock 營運資料。 |
+| 關聯式查詢層 | 已實作 | 已有可用性、票價、座位、訂票、取消與驗證函式。 |
+| 向量/RAG 種子資料載入 | 已實作 | `skeleton/seed_vectors.py` 會把政策 JSON 嵌入到 pgvector。 |
+| 政策搜尋 | 已實作 | `query_policy_vector_search()` 會搜尋 `policy_documents`。 |
+| Neo4j 種子資料載入 | 未實作 | `skeleton/seed_neo4j.py` 仍包含 TODO 註解。 |
+| Neo4j 查詢層 | 未實作 | `databases/graph/queries.py` 內的函式目前會 raise `NotImplementedError`。 |
+| README 準確性 | 部分過時 | README 有有用的教學內容，但部分連接埠 / 狀態細節與目前檔案不一致。 |
+
+## 8. 如何理解或擴充系統
+
+### 心智模型
+
+可以把 TransitFlow 想成一個由 LLM 控制的協調器，底下連接多個專門資料庫：
+
+- UI 收集使用者意圖與登入狀態。
+- 智能代理決定哪個工具適合回答問題。
+- 查詢層從資料庫取回事實資料。
+- LLM 把取回的資料轉成自然語言回答。
+- 資料庫保持為事實來源。
+
+LLM 不應自行編造班次、價格、訂票或政策；它應該根據工具結果回答。
+
+### 擴充關聯式資料功能
+
+若要新增結構化資料能力：
+
+1. 在 `databases/relational/schema.sql` 新增或修改資料表。
+2. 如果需要種子資料，更新 `skeleton/seed_postgres.py`。
+3. 在 `databases/relational/queries.py` 新增查詢函式。
+4. 在 `skeleton/agent.py` 新增工具定義與執行分支。
+5. 在 UI 開啟除錯面板後測試。
+
+### 擴充政策知識
+
+若要新增政策知識：
+
+1. 在 `train-mock-data/` 內相關政策 JSON 檔新增條目。
+2. 重新執行 `skeleton/seed_vectors.py`。
+3. 在 UI 詢問相關問題並檢查除錯輸出。
+
+### 完成圖形資料功能
+
+若要完成目標圖形架構：
+
+1. 實作 `skeleton/seed_neo4j.py`，建立車站節點與關係。
+2. 實作 `databases/graph/queries.py` 內的六個圖形查詢函式。
+3. 確認目前 Compose 設定下 `.env` 使用 `NEO4J_URI=bolt://localhost:7688`。
+4. 透過除錯面板測試路線、替代路線、轉乘與延誤影響問題。
