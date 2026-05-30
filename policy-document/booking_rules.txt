@@ -1,0 +1,113 @@
+BOOKING RULES AND RESERVATION POLICY
+TransitFlow Transit Authority
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. NATIONAL RAIL BOOKING RULES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1.1 Advance Booking Requirement
+National Rail seats must be booked at least 30 minutes before the
+scheduled departure time. Bookings made less than 30 minutes before
+departure will not be accepted by the system. Passengers are strongly
+advised to book as early as possible, particularly for peak-hour services
+and first class travel, as seats are limited.
+
+1.2 Seat Reservation
+Every National Rail booking includes a reserved seat. Passengers are
+assigned a specific coach and seat number at the time of booking. The
+coach type (A for first class, B for standard) corresponds to the
+fare class selected. Passengers must occupy their assigned seat. If a
+passenger wishes to sit elsewhere, they must rebook with a different
+seat selection, subject to availability.
+
+1.3 Maximum Tickets Per Transaction
+A maximum of 9 tickets may be purchased in a single transaction.
+For group bookings of 10 or more passengers, please contact TransitFlow
+customer support directly. Group bookings are subject to availability
+and may require additional lead time.
+
+1.4 Booking Changes
+Changes to existing National Rail bookings (including date, time, origin,
+destination, or seat) are not currently supported. To travel on a
+different service, passengers must cancel the existing booking (subject
+to the refund policy) and make a new booking. Cancellation fees may apply.
+
+1.5 Booking Confirmation and ID
+Upon completing a National Rail booking, a unique booking ID in the
+format BK-XXXXXX is issued. This booking ID must be retained and
+presented to staff or inspectors upon request during travel. Passengers
+without a valid booking ID may be refused travel or required to purchase
+a new ticket on board at the walk-up fare.
+
+1.6 Missed Trains
+National Rail tickets are valid only for the specific service booked.
+If a passenger misses their train, their ticket is not transferable to
+a later service. Passengers must purchase a new ticket for the next
+available service. No compensation is provided for missed services
+resulting from the passenger's own lateness.
+
+1.7 Operating Days
+National Rail services operate seven days a week on lines NR1 and NR2.
+Services run between approximately 06:00 and 22:30. Frequency varies
+by line; NR1 and NR2 run every 30 minutes during standard hours.
+Passengers should check the TransitFlow app for real-time schedule
+and any planned engineering works that may affect services.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2. METRO BOOKING RULES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+2.1 No Advance Booking Required
+Metro tickets and day passes do not require advance booking. Passengers
+may purchase a ticket or day pass at any time through the TransitFlow
+app or at station machines. Seats on the metro are not reserved —
+travel is on a first-come, first-served basis.
+
+2.2 Frequency and Operating Hours
+Metro lines M1, M2, M3, and M4 operate seven days a week. Services
+run every 5 minutes during standard operating hours, from first train
+at 05:30 to last train at 23:30. Passengers should check the TransitFlow
+app for any planned disruptions or reduced frequency periods.
+
+2.3 Interchange Journeys
+Passengers travelling across metro lines may interchange at designated
+interchange stations at no additional cost within a single journey.
+The key interchange station is Central Square (MS01), which connects
+lines M1 and M2. Passengers must not exit the fare-paid area during
+an interchange — exiting and re-entering will result in a new fare
+being charged.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3. CROSS-NETWORK TRAVEL (METRO + NATIONAL RAIL)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+3.1 Separate Tickets Required
+Metro and National Rail are separate fare systems. Passengers travelling
+on a combined journey involving both networks must purchase separate
+tickets for each leg. A metro ticket does not permit travel on National
+Rail services, and vice versa.
+
+3.2 Interchange Stations
+Passengers can transfer between the metro and National Rail networks
+at designated interchange stations. The primary interchange point is
+Central Square (MS01) and Central Station (NR01), which are directly
+connected. Passengers must exit the metro fare-paid area and enter
+the National Rail area separately, presenting their National Rail
+booking upon entry.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+4. ACCOUNT AND REGISTRATION REQUIREMENTS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+4.1 Account Required for National Rail Bookings
+A registered TransitFlow account is required to purchase National Rail
+tickets. Registration requires a valid email address, full name, year
+of birth, and a secure password. Metro tickets may be purchased as a
+guest through station machines, but purchasing through the app requires
+a registered account.
+
+4.2 Account Security
+Passengers are responsible for keeping their account credentials secure.
+TransitFlow will never ask for your password by email or phone. If you
+believe your account has been compromised, contact customer support
+immediately and change your password via the app.

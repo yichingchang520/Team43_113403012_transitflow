@@ -170,5 +170,15 @@
       }
     ],
     "exclusions": "Delays caused by third-party events (extreme weather, security incidents, government directives, or passenger-caused incidents) are not eligible for compensation."
-  }
+  },
+{
+  "policy_id": "RF005_SIMPLE",
+  "label": "Delay Compensation - Easy Reference",
+  "applies_to": {
+    "network_type": "all"
+  },
+  "content": "DELAY COMPENSATION SUMMARY: For delays of 30 to 59 minutes, you get 50% refund. For delays of 60 to 119 minutes, you get 100% refund. For delays of 120 minutes or more, you get 100% refund plus up to $10 for alternative transport. Claim within 28 days. Delays must be operator fault. Excludes weather, security, and passenger-caused delays.",
+  "summary": "30-59 min = 50% refund. 60-119 min = 100% refund. 120+ min = 100% refund + $10."
+}
+
 ]
