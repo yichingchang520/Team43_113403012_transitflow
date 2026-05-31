@@ -81,13 +81,26 @@ CREATE TABLE metro_schedules (
     direction               VARCHAR(20)  NOT NULL,
     origin_station_id       VARCHAR(10)  NOT NULL REFERENCES metro_stations(station_id),
     destination_station_id  VARCHAR(10)  NOT NULL REFERENCES metro_stations(station_id),
-    stops_in_order          JSONB        NOT NULL,
-    travel_time_from_origin JSONB        NOT NULL,
     first_train_time        TIME         NOT NULL,
     last_train_time         TIME         NOT NULL,
     base_fare_usd           NUMERIC(6,2) NOT NULL CHECK (base_fare_usd >= 0),
     per_stop_rate_usd       NUMERIC(6,2) NOT NULL CHECK (per_stop_rate_usd >= 0),
     frequency_min           INT          NOT NULL CHECK (frequency_min > 0)
+);
+
+-- Stop sequence + cumulative travel time for each metro schedule.
+-- Replaces the stops_in_order / travel_time_from_origin JSONB columns with a
+-- properly normalised junction table — one row per (schedule, stop).
+-- PK is (schedule_id, stop_order) so stop ordering is the natural key;
+-- UNIQUE(schedule_id, station_id) additionally forbids a station appearing
+-- twice in the same schedule (valid here since no metro line is circular).
+CREATE TABLE metro_schedule_stops (
+    schedule_id     VARCHAR(20) NOT NULL REFERENCES metro_schedules(schedule_id) ON DELETE CASCADE,
+    station_id      VARCHAR(10) NOT NULL REFERENCES metro_stations(station_id)   ON DELETE RESTRICT,
+    stop_order      INT         NOT NULL,                 -- 1 = origin, 2 = next stop, ...
+    travel_time_min INT         NOT NULL CHECK (travel_time_min >= 0),  -- cumulative minutes from origin
+    PRIMARY KEY (schedule_id, stop_order),
+    UNIQUE (schedule_id, station_id)
 );
 
 CREATE TABLE metro_schedule_days (
@@ -103,9 +116,9 @@ CREATE TABLE national_rail_schedules (
     direction               VARCHAR(20)  NOT NULL,
     origin_station_id       VARCHAR(10)  NOT NULL REFERENCES national_rail_stations(station_id),
     destination_station_id  VARCHAR(10)  NOT NULL REFERENCES national_rail_stations(station_id),
-    stops_in_order          JSONB        NOT NULL,
+    -- passed_through_stations stays JSONB: it is informational only (stations the
+    -- train passes without stopping) and no query ever filters by it individually.
     passed_through_stations JSONB,
-    travel_time_from_origin JSONB        NOT NULL,
     first_train_time        TIME         NOT NULL,
     last_train_time         TIME         NOT NULL,
     std_base_fare_usd       NUMERIC(6,2) NOT NULL CHECK (std_base_fare_usd >= 0),
@@ -113,6 +126,17 @@ CREATE TABLE national_rail_schedules (
     first_base_fare_usd     NUMERIC(6,2) NOT NULL CHECK (first_base_fare_usd >= 0),
     first_per_stop_rate_usd NUMERIC(6,2) NOT NULL CHECK (first_per_stop_rate_usd >= 0),
     frequency_min           INT          NOT NULL CHECK (frequency_min > 0)
+);
+
+-- Stop sequence + cumulative travel time for each national rail schedule.
+-- Replaces the stops_in_order / travel_time_from_origin JSONB columns.
+CREATE TABLE national_rail_schedule_stops (
+    schedule_id     VARCHAR(20) NOT NULL REFERENCES national_rail_schedules(schedule_id) ON DELETE CASCADE,
+    station_id      VARCHAR(10) NOT NULL REFERENCES national_rail_stations(station_id)   ON DELETE RESTRICT,
+    stop_order      INT         NOT NULL,                 -- 1 = origin, 2 = next stop, ...
+    travel_time_min INT         NOT NULL CHECK (travel_time_min >= 0),  -- cumulative minutes from origin
+    PRIMARY KEY (schedule_id, stop_order),
+    UNIQUE (schedule_id, station_id)
 );
 
 CREATE TABLE national_rail_schedule_days (
