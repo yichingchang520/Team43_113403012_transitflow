@@ -60,7 +60,7 @@ def build_documents():
         })
 
     # booking_rules.json — one document per network section
-    br = _load("booking_rules.json")
+    br = _load("booking_rules2.json")
     for section in ("national_rail", "metro", "general_rules"):
         if section in br:
             docs.append({
@@ -80,6 +80,42 @@ def build_documents():
                 "source_file": "travel_policies.json",
                 "content": _text({section: tp[section]}),
             })
+
+    # lost_property_policy.json — single document
+    lp = _load("lost_property_policy.json")
+    docs.append({
+        "title": lp["label"],
+        "category": "conduct",
+        "source_file": "lost_property_policy.json",
+        "content": _text(lp),
+    })
+
+    # accessibility_policy.json — single document
+    acc = _load("accessibility_policy.json")
+    docs.append({
+        "title": acc["label"],
+        "category": "conduct",
+        "source_file": "accessibility_policy.json",
+        "content": _text(acc),
+    })
+
+    # engineering_works_policy.json — single document
+    ew = _load("engineering_works_policy.json")
+    docs.append({
+        "title": ew["label"],
+        "category": "conduct",
+        "source_file": "engineering_works_policy.json",
+        "content": _text(ew),
+    })
+
+    # penalty_fares_policy.json — single document
+    pf = _load("penalty_fares_policy.json")
+    docs.append({
+        "title": pf["label"],
+        "category": "conduct",
+        "source_file": "penalty_fares_policy.json",
+        "content": _text(pf),
+    })
 
     return docs
 
