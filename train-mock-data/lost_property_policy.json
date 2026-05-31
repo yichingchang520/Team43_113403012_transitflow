@@ -1,0 +1,47 @@
+{
+  "version": "1.0",
+  "last_updated": "2024-01-01",
+  "policy_id": "LP001",
+  "label": "Lost Property Policy – All Networks",
+  "applies_to": {
+    "network_type": "all"
+  },
+  "reporting": {
+    "on_train": {
+      "description": "If a passenger loses an item on board, they should inform the train conductor or platform staff at the earliest opportunity.",
+      "contact_method": "Report via in-app chat, customer service email, or station help desk.",
+      "response_time": "Customer service will acknowledge reports within 2 business days."
+    },
+    "at_station": {
+      "description": "Lost items found at stations are handed to the station's lost property office.",
+      "where_to_enquire": "Enquiries should be made in person at the station lost property desk, via the app, or by calling customer service.",
+      "retention_period_days": 28,
+      "note": "Items not claimed within 28 days may be donated to charity, disposed of, or handed to local authorities, at the operator's discretion."
+    }
+  },
+  "found_items": {
+    "on_train": {
+      "description": "Items found on trains by staff or other passengers should be handed to the train conductor or deposited at the next station's lost property desk.",
+      "passenger_obligation": "Passengers who find items are encouraged to hand them in rather than remove them from the train."
+    },
+    "collection": {
+      "identification_required": true,
+      "accepted_id": ["National ID card", "Passport", "Driving licence"],
+      "description": "Passengers collecting lost property must provide a valid photo ID and describe the item accurately before collection.",
+      "collection_fee_usd": 0.00,
+      "collection_hours": "During staffed station hours. Contact the relevant station in advance to confirm opening times."
+    }
+  },
+  "valuable_items": {
+    "examples": ["Electronics", "Jewellery", "Cash", "Travel documents"],
+    "special_handling": "High-value or sensitive items (passports, large amounts of cash, medication) are logged separately and stored securely. The passenger will be contacted directly if contact details are available from the booking.",
+    "law_enforcement": "Items of significant value or items believed to be connected to criminal activity will be handed to local law enforcement."
+  },
+  "liability": {
+    "operator_liability": "The operator is not liable for lost, damaged, or stolen items left on trains or at stations. Passengers are responsible for their own belongings at all times.",
+    "insurance": "Passengers are advised to ensure valuable items are covered by appropriate personal travel insurance."
+  },
+  "perishable_items": {
+    "description": "Perishable items (food, medication requiring refrigeration, etc.) that cannot be safely stored will be disposed of immediately."
+  }
+}
