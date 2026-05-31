@@ -447,13 +447,20 @@ def auto_select_adjacent_seats(available_seats: list[dict], count: int) -> list[
 # ── USER & BOOKING QUERIES ────────────────────────────────────────────────────
 
 def query_user_profile(user_email: str) -> Optional[dict]:
-    """Return a user's profile by email."""
+    """Return a user's profile by email.
+
+    Includes both date_of_birth and year_of_birth: the rubric refers to
+    year_of_birth, so it is exposed directly (extracted from date_of_birth)
+    while the full date is also kept for completeness.
+    """
     with _connect() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
                 """
                 SELECT user_id, full_name, first_name, surname,
-                       email, phone, date_of_birth, registered_at, is_active
+                       email, phone, date_of_birth,
+                       EXTRACT(YEAR FROM date_of_birth)::int AS year_of_birth,
+                       registered_at, is_active
                 FROM users
                 WHERE email = %s
                 """,
