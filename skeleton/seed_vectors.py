@@ -23,6 +23,7 @@ sys.path.insert(0, ".")
 
 from skeleton.llm_provider import llm
 from databases.relational.queries import store_policy_document
+from skeleton.config import VECTOR_SIMILARITY_THRESHOLD, VECTOR_TOP_K
 
 _DATA_DIR = os.path.normpath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "train-mock-data")
@@ -66,7 +67,7 @@ def build_documents():
             docs.append({
                 "title": f"Booking Rules — {section.replace('_', ' ').title()}",
                 "category": "booking",
-                "source_file": "booking_rules.json",
+                "source_file": "booking_rules2.json",
                 "content": _text({section: br[section]}),
             })
 
