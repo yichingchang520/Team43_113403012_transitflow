@@ -28,7 +28,7 @@ flowchart TD
     UI --> U
 ```
 
-Important current-state note: the relational and vector pipelines are implemented. The Neo4j seeder and graph query functions are still TODO skeletons, so graph route questions will not fully work until those functions are implemented.
+Important current-state note: the relational pipeline, vector search pipeline, Neo4j seeder, and graph query functions are implemented. Neo4j behavior should still be verified end to end after the containers are running and the graph has been seeded.
 
 ## 2. Requirements
 
@@ -73,7 +73,7 @@ flowchart LR
     subgraph DataAccess["Data Access Layer"]
         RelQ["Relational Queries"]
         VecQ["Vector Search"]
-        GraphQ["Graph Queries<br/>current TODO"]
+        GraphQ["Graph Queries<br/>Neo4j routing"]
     end
 
     subgraph Storage["Storage Layer"]
@@ -157,7 +157,7 @@ Write operations use explicit transactions. Booking creation relies on serializa
 
 ### `databases/graph/queries.py`
 
-This is the intended Neo4j access layer. It should support:
+This is the Neo4j access layer. It currently supports:
 
 - Fastest route by travel time.
 - Cheapest route by estimated fare.
@@ -166,13 +166,13 @@ This is the intended Neo4j access layer. It should support:
 - Delay ripple analysis.
 - Direct station connections.
 
-Current state: the function signatures exist, but the implementation still raises `NotImplementedError`.
+Current state: the query functions have Cypher implementations and use the Neo4j driver for shortest route, alternative route, interchange, delay ripple, and direct connection queries. This layer should be verified after running `skeleton/seed_neo4j.py`.
 
 ### Seed Scripts
 
 - `skeleton/seed_postgres.py`: loads station, schedule, seat, user, booking, trip, payment, and feedback data from `train-mock-data/`.
 - `skeleton/seed_vectors.py`: builds policy documents from JSON policy files, embeds them with the configured provider, and stores them in `policy_documents`.
-- `skeleton/seed_neo4j.py`: intended to load graph nodes and relationships from station JSON files. Current state: it still contains TODO steps.
+- `skeleton/seed_neo4j.py`: loads station JSON files, creates metro and national rail nodes, and creates `METRO_LINK`, `RAIL_LINK`, and `INTERCHANGE_TO` relationships.
 
 ## 5. Data Architecture
 
@@ -233,13 +233,13 @@ The current schema uses `vector(768)`, which matches the default Ollama setup.
 
 The intended graph model represents stations and physical links:
 
-- `:Station:MetroStation` nodes for metro stations `MS01` to `MS20`.
-- `:Station:NationalRailStation` nodes for rail stations `NR01` to `NR10`.
+- `:MetroStation` nodes for metro stations `MS01` to `MS20`.
+- `:NationalRailStation` nodes for rail stations `NR01` to `NR10`.
 - `METRO_LINK` relationships between metro stations.
 - `RAIL_LINK` relationships between national rail stations.
 - `INTERCHANGE_TO` relationships between metro and national rail interchange stations.
 
-Current state: this schema is described in `AI_SESSION_CONTEXT.md`, but `skeleton/seed_neo4j.py` and `databases/graph/queries.py` still need implementation.
+Current state: `skeleton/seed_neo4j.py` creates `MetroStation` and `NationalRailStation` nodes plus `METRO_LINK`, `RAIL_LINK`, and `INTERCHANGE_TO` relationships. `databases/graph/queries.py` uses those nodes and relationships for routing queries.
 
 ## 6. Main User Flows
 
@@ -265,7 +265,7 @@ sequenceDiagram
     UI-->>U: Display response
 ```
 
-For metro fare, the agent queries metro schedules first, computes the number of stops between origin and destination, then calls metro fare calculation. For graph route queries, the intended flow goes through Neo4j, but current graph functions must be implemented first.
+For metro fare, the agent queries metro schedules first, computes the number of stops between origin and destination, then calls metro fare calculation. For graph route queries, the flow goes through Neo4j, so `skeleton/seed_neo4j.py` must be run before using those features.
 
 ### Logged-In User Booking History
 
@@ -304,8 +304,8 @@ For metro fare, the agent queries metro schedules first, computes the number of 
 | Relational query layer | Implemented | Availability, fare, seat, booking, cancellation, and auth functions exist. |
 | Vector/RAG seeding | Implemented | `skeleton/seed_vectors.py` embeds policy JSON into pgvector. |
 | Policy search | Implemented | `query_policy_vector_search()` searches `policy_documents`. |
-| Neo4j seeding | Not implemented | `skeleton/seed_neo4j.py` still contains TODO comments. |
-| Neo4j query layer | Not implemented | `databases/graph/queries.py` functions currently raise `NotImplementedError`. |
+| Neo4j seeding | Implemented | `skeleton/seed_neo4j.py` creates metro/rail nodes and three relationship types. |
+| Neo4j query layer | Implemented | `databases/graph/queries.py` includes route, alternative route, interchange, delay ripple, and direct connection queries. |
 | README accuracy | Partially stale | README contains useful teaching material but some ports/status details do not match current files. |
 
 ## 8. How to Understand or Extend the System

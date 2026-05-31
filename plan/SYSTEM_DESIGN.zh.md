@@ -28,7 +28,7 @@ flowchart TD
     UI --> U
 ```
 
-重要現況：關聯式資料庫與向量檢索流程已經實作；Neo4j 種子資料載入器與圖形查詢函式目前仍是 TODO 骨架。圖形路線類問題要等 Neo4j 相關函式完成後才會完整運作。
+重要現況：關聯式資料庫、向量檢索流程、Neo4j 種子資料載入器與圖形查詢函式都已有實作。Neo4j 相關功能仍應在實際容器啟動並完成 seeding 後，用路線、轉乘與延誤影響問題做端到端驗證。
 
 ## 2. 需求
 
@@ -73,7 +73,7 @@ flowchart LR
     subgraph DataAccess["資料存取層"]
         RelQ["關聯式查詢"]
         VecQ["向量搜尋"]
-        GraphQ["圖形查詢<br/>目前仍是 TODO"]
+        GraphQ["圖形查詢<br/>Neo4j routing"]
     end
 
     subgraph Storage["儲存層"]
@@ -157,7 +157,7 @@ PostgreSQL 資料存取層使用 `psycopg2`、`RealDictCursor` 與 `ThreadedConn
 
 ### `databases/graph/queries.py`
 
-這是目標設計中的 Neo4j 資料存取層，應支援：
+這是 Neo4j 資料存取層，目前已提供：
 
 - 依旅行時間尋找最快路線。
 - 依估算票價尋找最便宜路線。
@@ -166,13 +166,13 @@ PostgreSQL 資料存取層使用 `psycopg2`、`RealDictCursor` 與 `ThreadedConn
 - 延誤影響範圍分析。
 - 直接相連車站查詢。
 
-目前狀態：函式簽名已存在，但實作仍會 raise `NotImplementedError`。
+目前狀態：查詢函式已有 Cypher 實作，會透過 Neo4j driver 執行最短路徑、替代路線、轉乘、延誤影響與直接連線查詢。這部分應搭配 `skeleton/seed_neo4j.py` 實際載入資料後驗證。
 
 ### 種子資料腳本
 
 - `skeleton/seed_postgres.py`: 從 `train-mock-data/` 載入車站、班次、座位、使用者、訂票、旅程、付款與意見回饋資料。
 - `skeleton/seed_vectors.py`: 從 JSON 政策檔建立政策文件，產生嵌入向量，並存入 `policy_documents`。
-- `skeleton/seed_neo4j.py`: 目標上從車站 JSON 檔載入圖形節點與關係。目前仍是 TODO。
+- `skeleton/seed_neo4j.py`: 從車站 JSON 檔載入捷運與國鐵節點，建立 `METRO_LINK`、`RAIL_LINK` 與 `INTERCHANGE_TO` 關係。
 
 ## 5. 資料架構
 
@@ -231,13 +231,13 @@ sequenceDiagram
 
 目標圖形模型用來表示車站與實體連線：
 
-- `:Station:MetroStation` 節點表示 `MS01` 到 `MS20` 的捷運車站。
-- `:Station:NationalRailStation` 節點表示 `NR01` 到 `NR10` 的國鐵車站。
+- `:MetroStation` 節點表示 `MS01` 到 `MS20` 的捷運車站。
+- `:NationalRailStation` 節點表示 `NR01` 到 `NR10` 的國鐵車站。
 - `METRO_LINK` 關係表示捷運車站之間的連線。
 - `RAIL_LINK` 關係表示國鐵車站之間的連線。
 - `INTERCHANGE_TO` 關係表示捷運與國鐵轉乘站之間的連線。
 
-目前這個設計已在 `AI_SESSION_CONTEXT.md` 中描述，但 `skeleton/seed_neo4j.py` 與 `databases/graph/queries.py` 仍需要實作。
+目前 `skeleton/seed_neo4j.py` 會建立 `MetroStation` 與 `NationalRailStation` 節點，並建立 `METRO_LINK`、`RAIL_LINK`、`INTERCHANGE_TO` 關係；`databases/graph/queries.py` 會使用這些節點與關係執行路線查詢。
 
 ## 6. 主要使用者流程
 
@@ -263,7 +263,7 @@ sequenceDiagram
     UI-->>U: 顯示回覆
 ```
 
-對捷運票價來說，智能代理會先查捷運班次，計算起點到終點之間的站數，再呼叫票價計算。對圖形路線查詢來說，目標流程會走 Neo4j；目前必須等圖形查詢函式完成後才會完整運作。
+對捷運票價來說，智能代理會先查捷運班次，計算起點到終點之間的站數，再呼叫票價計算。對圖形路線查詢來說，流程會走 Neo4j；實際使用前需要先執行 `skeleton/seed_neo4j.py` 載入圖形資料。
 
 ### 登入使用者訂票歷史
 
@@ -302,8 +302,8 @@ sequenceDiagram
 | 關聯式查詢層 | 已實作 | 已有可用性、票價、座位、訂票、取消與驗證函式。 |
 | 向量/RAG 種子資料載入 | 已實作 | `skeleton/seed_vectors.py` 會把政策 JSON 嵌入到 pgvector。 |
 | 政策搜尋 | 已實作 | `query_policy_vector_search()` 會搜尋 `policy_documents`。 |
-| Neo4j 種子資料載入 | 未實作 | `skeleton/seed_neo4j.py` 仍包含 TODO 註解。 |
-| Neo4j 查詢層 | 未實作 | `databases/graph/queries.py` 內的函式目前會 raise `NotImplementedError`。 |
+| Neo4j 種子資料載入 | 已實作 | `skeleton/seed_neo4j.py` 會建立捷運/國鐵節點與三種關係。 |
+| Neo4j 查詢層 | 已實作 | `databases/graph/queries.py` 已有路線、替代路線、轉乘、延誤影響與直接連線查詢。 |
 | README 準確性 | 部分過時 | README 有有用的教學內容，但部分連接埠 / 狀態細節與目前檔案不一致。 |
 
 ## 8. 如何理解或擴充系統
