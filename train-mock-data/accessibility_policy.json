@@ -1,0 +1,71 @@
+{
+  "version": "1.0",
+  "last_updated": "2024-01-01",
+  "policy_id": "ACC001",
+  "label": "Accessibility and Assisted Travel Policy – All Networks",
+  "applies_to": {
+    "network_type": "all"
+  },
+  "wheelchair_and_mobility": {
+    "metro": {
+      "wheelchair_access": "All metro stations are step-free accessible. Lifts and ramps are available at all stations.",
+      "boarding_ramps": "Portable boarding ramps are available at all metro stations. Request from platform staff.",
+      "dedicated_spaces": "Each metro carriage has at least one dedicated wheelchair space. These spaces must be vacated for wheelchair users on request.",
+      "lift_outages": "In the event of a lift outage, passengers should inform station staff who will arrange alternative assistance or route guidance."
+    },
+    "national_rail": {
+      "wheelchair_access": "All national rail stations are wheelchair accessible. Ramps are available on request from platform staff.",
+      "boarding_ramps": "Ramp assistance is provided by platform staff. Passengers requiring ramp assistance should notify staff on arrival at the station.",
+      "dedicated_spaces": "All national rail trains have at least two dedicated wheelchair spaces, bookable in advance at no extra charge.",
+      "wheelchair_space_booking": {
+        "available": true,
+        "fee_usd": 0.00,
+        "how_to_book": "Contact customer service at least 24 hours before travel, or book via the app where the option is available.",
+        "note": "Wheelchair spaces are subject to availability. Early booking is strongly recommended."
+      }
+    }
+  },
+  "assisted_boarding": {
+    "pre_booking": {
+      "required": true,
+      "notice_hours": 24,
+      "description": "Passengers requiring boarding assistance should contact customer service at least 24 hours before travel.",
+      "contact_method": "In-app chat, email, or station help desk.",
+      "note": "Where possible, same-day assistance will be provided, but cannot be guaranteed without advance notice."
+    },
+    "on_the_day": {
+      "description": "Passengers with mobility difficulties are welcome to board first. Please inform platform staff on arrival.",
+      "priority_boarding": true
+    }
+  },
+  "assistance_animals": {
+    "metro": {
+      "guide_dogs": "Guide dogs and registered assistance animals are permitted at all times on all metro services without a carrier and at no charge.",
+      "other_animals": "Only registered assistance animals are exempt from the standard pet carrier policy. See travel_policies.json for full pet rules."
+    },
+    "national_rail": {
+      "guide_dogs": "Guide dogs and registered assistance animals are permitted at all times in all coaches at no charge.",
+      "documentation": "Staff may ask for evidence that an animal is a registered assistance animal. Passengers are encouraged to carry relevant documentation."
+    }
+  },
+  "visual_and_hearing_impairments": {
+    "audio_announcements": "All metro and national rail services provide audio announcements of upcoming stations.",
+    "visual_displays": "All carriages and stations feature digital display boards showing next stops, service status, and disruption alerts.",
+    "assistance_request": "Passengers with visual or hearing impairments requiring additional support should contact customer service in advance or speak to station staff on arrival."
+  },
+  "priority_seating": {
+    "metro": {
+      "description": "Seats marked with a yellow priority sign are reserved for passengers with disabilities, elderly passengers (65+), pregnant women, and passengers travelling with young children.",
+      "rule": "All other passengers must vacate priority seats immediately when requested."
+    },
+    "national_rail": {
+      "description": "All coaches include priority seats marked with a blue priority sign.",
+      "rule": "Priority seats are reserved for passengers with disabilities, elderly passengers (65+), pregnant women, and passengers travelling with young children. Other passengers must vacate on request."
+    }
+  },
+  "complaint_and_feedback": {
+    "description": "Passengers who experienced difficulties with accessibility or assisted travel may submit feedback or a complaint via in-app chat, email, or at a station help desk.",
+    "response_time": "Within 2 business days.",
+    "escalation": "Unresolved accessibility complaints may be escalated to the relevant national transport accessibility regulator."
+  }
+}

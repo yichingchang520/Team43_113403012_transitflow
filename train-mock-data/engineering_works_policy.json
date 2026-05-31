@@ -1,0 +1,70 @@
+{
+  "version": "1.0",
+  "last_updated": "2024-01-01",
+  "policy_id": "EW001",
+  "label": "Engineering Works and Planned Disruption Policy – All Networks",
+  "applies_to": {
+    "network_type": "all"
+  },
+  "notice_and_communication": {
+    "advance_notice": {
+      "minimum_notice_days": 7,
+      "description": "Passengers will be notified of planned engineering works at least 7 days in advance where possible.",
+      "channels": [
+        "In-app push notification",
+        "Email to affected booking holders",
+        "Station notice boards",
+        "Operator website and social media"
+      ]
+    },
+    "short_notice_works": {
+      "description": "In exceptional circumstances (e.g. emergency safety works), engineering works may be announced with less than 7 days' notice.",
+      "passenger_support": "Customer service will be available to assist affected passengers with rebooking or refunds."
+    }
+  },
+  "affected_bookings": {
+    "notification": "Passengers with confirmed bookings on affected services will be contacted directly via email and in-app notification.",
+    "options": [
+      {
+        "option": "Travel on an alternative service",
+        "description": "Passengers may transfer their booking to an alternative scheduled service on the same route at no charge, subject to availability.",
+        "how_to": "Contact customer service or rebook via the app using the disruption rebooking flow."
+      },
+      {
+        "option": "Full refund",
+        "description": "Passengers may cancel their affected booking and receive a full refund with no admin fee, regardless of when the cancellation is made.",
+        "admin_fee_usd": 0.00,
+        "refund_timeline_days": 5
+      },
+      {
+        "option": "Travel on a replacement service",
+        "description": "Where available, replacement bus or rail services will be operated between affected stations. Details will be communicated with the disruption notice."
+      }
+    ]
+  },
+  "replacement_services": {
+    "bus_replacement": {
+      "description": "Replacement bus services will operate between affected stations where rail services are suspended.",
+      "ticket_validity": "Existing rail tickets are valid on replacement bus services for the duration of the disruption. No additional fare is required.",
+      "journey_time": "Replacement bus journeys typically take longer than the equivalent rail journey. Passengers should allow extra time.",
+      "accessibility": "Accessible replacement buses will be provided where operationally possible. Passengers with accessibility requirements should contact customer service in advance."
+    },
+    "partial_disruption": {
+      "description": "Where only part of a route is affected, passengers may be required to change at the boundary station and board a replacement service for the disrupted section."
+    }
+  },
+  "refund_during_disruption": {
+    "eligibility": "Any passenger holding a valid ticket for a service that is cancelled or significantly altered due to engineering works or planned disruption is entitled to a full refund.",
+    "admin_fee_usd": 0.00,
+    "how_to_claim": "Submit a refund request via the app or customer service, quoting the booking reference and the affected service.",
+    "timeline_days": 5
+  },
+  "delay_compensation": {
+    "description": "If a replacement service results in a delay of 30 minutes or more compared to the original scheduled arrival time, passengers may be eligible for delay compensation under policy RF005.",
+    "reference": "See refund_policy.json → RF005 for compensation rules and how to claim."
+  },
+  "passenger_responsibilities": {
+    "description": "Passengers are encouraged to check for disruption notices before travelling, particularly during holiday periods and weekends when engineering works are most commonly scheduled.",
+    "how_to_check": "Check the operator app, website, or station display boards for the latest service information."
+  }
+}

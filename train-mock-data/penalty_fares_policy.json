@@ -1,0 +1,76 @@
+{
+  "version": "1.0",
+  "last_updated": "2024-01-01",
+  "policy_id": "PF001",
+  "label": "Penalty Fares and Fare Evasion Policy – All Networks",
+  "applies_to": {
+    "network_type": "all"
+  },
+  "penalty_fare": {
+    "definition": "A penalty fare is a charge issued to a passenger who is found travelling without a valid ticket, or who has not tapped in/out correctly at the relevant gate or barrier.",
+    "metro": {
+      "penalty_fare_usd": 50.00,
+      "conditions": [
+        "Travelling without a valid ticket",
+        "Failing to tap in at the origin gate",
+        "Failing to tap out at the destination gate",
+        "Using an expired or invalid ticket",
+        "Using another passenger's ticket"
+      ],
+      "issued_by": "Authorised ticket inspection staff or automated gate systems.",
+      "payment_deadline_days": 21,
+      "payment_methods": ["In-app", "Online via operator website", "At a staffed station counter"]
+    },
+    "national_rail": {
+      "penalty_fare_usd": 100.00,
+      "conditions": [
+        "Travelling without a valid ticket",
+        "Travelling on a different service or class than booked without a valid change",
+        "Using an expired or invalid ticket",
+        "Using another passenger's ticket",
+        "Deliberate fare evasion"
+      ],
+      "issued_by": "Authorised ticket inspection staff or conductors.",
+      "payment_deadline_days": 21,
+      "payment_methods": ["In-app", "Online via operator website", "At a staffed station counter"]
+    }
+  },
+  "fare_evasion": {
+    "definition": "Fare evasion is the deliberate act of travelling without paying the applicable fare, or of using fraudulent means to obtain a discounted or free ticket.",
+    "examples": [
+      "Presenting a counterfeit or altered ticket",
+      "Using a child fare ticket when the passenger is aged 16 or over",
+      "Claiming a group or discount fare without meeting the eligibility criteria",
+      "Tailgating through barriers without tapping in",
+      "Using another passenger's personalised ticket"
+    ],
+    "consequences": {
+      "immediate": "The passenger may be required to purchase a full-price ticket immediately or be removed from the service.",
+      "penalty_fare": "A penalty fare will be issued in addition to the outstanding fare.",
+      "prosecution": "In cases of deliberate or repeated fare evasion, the operator reserves the right to refer the matter to law enforcement. Prosecution may result in a fine of up to $500.00 and/or a travel ban.",
+      "travel_ban": "Passengers found to have committed serious or repeated fare evasion may be banned from using the network for a period determined by the operator."
+    }
+  },
+  "appeals": {
+    "right_to_appeal": true,
+    "appeal_deadline_days": 14,
+    "how_to_appeal": "Submit a written appeal via the app, email, or by post within 14 days of the penalty fare being issued, quoting the penalty reference number.",
+    "grounds_for_appeal": [
+      "Ticket was purchased but could not be presented due to a technical fault",
+      "Penalty was issued in error",
+      "Medical or emergency circumstances prevented normal ticketing"
+    ],
+    "outcome_timeline_days": 10,
+    "escalation": "If an appeal is rejected and the passenger disagrees with the decision, they may escalate to the independent transport adjudicator within 28 days."
+  },
+  "unpaid_penalty_fares": {
+    "reminder_process": "A reminder notice will be sent after 21 days if payment has not been received.",
+    "debt_recovery": "Unpaid penalty fares may be referred to a debt collection agency after 42 days. Additional administration charges may apply.",
+    "legal_action": "The operator reserves the right to pursue unpaid penalty fares through civil court proceedings."
+  },
+  "staff_powers": {
+    "inspection": "Authorised inspection staff may request to see a valid ticket and photo ID from any passenger at any time.",
+    "refusal_to_comply": "Passengers who refuse to show a valid ticket or ID, or who behave aggressively toward staff, may be removed from the service. Law enforcement may be called if necessary.",
+    "id_accepted": ["National ID card", "Passport", "Driving licence"]
+  }
+}
