@@ -139,13 +139,16 @@ def build_documents():
     # delay_compensation_policy.json — single document
     # TASK 6 EXTENSION: New policy covering compensation tiers for metro and NR
     # delays, how to claim, season ticket holders, and engineering works refunds
+    # Split into 3 smaller documents so Ollama doesn't run out of memory
     dc = _load("delay_compensation_policy.json")
-    docs.append({
-        "title": dc["label"],
-        "category": "refund",
-        "source_file": "delay_compensation_policy.json",
-        "content": _text(dc),
-    })
+    for section in ("metro", "national_rail", "engineering_works_and_disruption"):
+        if section in dc.get("delay_compensation", {}):
+            docs.append({
+                "title": f"Delay Compensation — {section.replace('_', ' ').title()}",
+                "category": "refund",
+                "source_file": "delay_compensation_policy.json",
+                "content": _text({section: dc["delay_compensation"][section]}),
+            })
     
     return docs
 
