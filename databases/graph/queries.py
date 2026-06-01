@@ -62,26 +62,27 @@ def query_shortest_route(
 
 # ── CHEAPEST ROUTE (Dijkstra by fare) ────────────────────────────────────────
 
-def query_cheapest_route(
-    origin_id: str,
-    destination_id: str,
-    network: str = "auto",
-    fare_class: str = "standard",
-) -> dict:
-    """
-    Find the cheapest path between two stations. 
-    Since fare is calculated by base_fare + per_stop_rate, the cheapest route 
-    is effectively the one with the fewest stops (shortestPath).
-    """
+def query_cheapest_route(origin_id: str, destination_id: str, fare_class: str = "standard") -> dict:
+    
+    # 在 Cypher 中使用 CASE WHEN 來根據 fare_class 決定讀取哪個屬性
     cypher = """
     MATCH (start {station_id: $orig}), (end {station_id: $dest})
     MATCH path = shortestPath((start)-[:METRO_LINK|RAIL_LINK|INTERCHANGE_TO*]-(end))
     RETURN [n IN nodes(path) | {station_id: n.station_id, name: n.name}] AS stations,
-           length(path) AS total_stops
+           reduce(total_cost = 0, r IN relationships(path) | 
+               total_cost + CASE 
+                   WHEN type(r) = 'RAIL_LINK' AND $fare_class = 'first' THEN coalesce(r.first_class_fare, 0)
+                   WHEN type(r) = 'RAIL_LINK' AND $fare_class = 'standard' THEN coalesce(r.standard_fare, 0)
+                   WHEN type(r) = 'METRO_LINK' THEN coalesce(r.fare, 0)
+                   ELSE 0 
+               END
+           ) AS total_cost
     """
+    
     with _driver() as driver:
         with driver.session() as session:
-            record = session.run(cypher, orig=origin_id, dest=destination_id).single()
+            # 把 fare_class 作為參數傳進去 session.run
+            record = session.run(cypher, orig=origin_id, dest=destination_id, fare_class=fare_class).single()
             if not record:
                 return {"found": False}
             
@@ -161,11 +162,16 @@ def query_delay_ripple(delayed_station_id: str, hops: int = 2) -> list[dict]:
     """
     Find all stations within N hops of a delayed or disrupted station.
     """
-    # 尋找距離指定站點 N 步以內的所有受影響站點
+    # 🌟 修正點：防呆機制，如果 hops 為 0 或負數，直接回傳空陣列，不戳資料庫！
+    if hops <= 0:
+        return []
+
     cypher = f"""
     MATCH (start {{station_id: $delayed}})-[*1..{hops}]-(affected)
-    RETURN DISTINCT affected.station_id AS station_id, affected.name AS name,
-           length(shortestPath((start)-[*]-(affected))) AS hops_away
+    RETURN DISTINCT affected.station_id AS station_id, 
+           affected.name AS name,
+           length(shortestPath((start)-[*]-(affected))) AS hops_away,
+           affected.lines AS lines_affected
     ORDER BY hops_away ASC
     """
     affected_stations = []
@@ -176,7 +182,8 @@ def query_delay_ripple(delayed_station_id: str, hops: int = 2) -> list[dict]:
                 affected_stations.append({
                     "station_id": record["station_id"],
                     "name": record["name"],
-                    "hops_away": record["hops_away"]
+                    "hops_away": record["hops_away"],
+                    "lines_affected": record.get("lines_affected", [])
                 })
     return affected_stations
 
