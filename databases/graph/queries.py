@@ -18,7 +18,6 @@ def example_count_nodes() -> int:
             result = session.run("MATCH (n) RETURN count(n) AS total")
             return result.single()["total"]
 
-
 # ── FASTEST ROUTE (Dijkstra by travel_time_min) ───────────────────────────────
 
 def query_shortest_route(
