@@ -124,8 +124,6 @@ def seed_metro_schedules(cur):
     rows = [
         (s["schedule_id"], s["line"], s["direction"],
          s["origin_station_id"], s["destination_station_id"],
-         json.dumps(s["stops_in_order"]),
-         json.dumps(s["travel_time_from_origin_min"]),
          s["first_train_time"], s["last_train_time"],
          s["base_fare_usd"], s["per_stop_rate_usd"], s["frequency_min"])
         for s in data
@@ -133,11 +131,23 @@ def seed_metro_schedules(cur):
     n = insert_many(cur, "metro_schedules",
                     ["schedule_id", "line", "direction",
                      "origin_station_id", "destination_station_id",
-                     "stops_in_order", "travel_time_from_origin",
                      "first_train_time", "last_train_time",
                      "base_fare_usd", "per_stop_rate_usd", "frequency_min"],
                     rows)
     print(f"  metro_schedules: {n} rows")
+
+    # Expand stops_in_order (ordered array) + travel_time_from_origin_min (dict)
+    # into one row per stop for the normalised metro_schedule_stops table.
+    # stop_order starts at 1 (origin); travel_time_min is cumulative from origin.
+    stop_rows = []
+    for s in data:
+        times = s["travel_time_from_origin_min"]
+        for order, station_id in enumerate(s["stops_in_order"], start=1):
+            stop_rows.append((s["schedule_id"], station_id, order, times.get(station_id, 0)))
+    n = insert_many(cur, "metro_schedule_stops",
+                    ["schedule_id", "station_id", "stop_order", "travel_time_min"],
+                    stop_rows)
+    print(f"  metro_schedule_stops: {n} rows")
 
     day_rows = [
         (s["schedule_id"], day)
@@ -157,9 +167,7 @@ def seed_national_rail_schedules(cur):
         rows.append((
             s["schedule_id"], s["line"], s["service_type"], s["direction"],
             s["origin_station_id"], s["destination_station_id"],
-            json.dumps(s["stops_in_order"]),
             json.dumps(s.get("passed_through_stations")),
-            json.dumps(s["travel_time_from_origin_min"]),
             s["first_train_time"], s["last_train_time"],
             fc["standard"]["base_fare_usd"], fc["standard"]["per_stop_rate_usd"],
             fc["first"]["base_fare_usd"], fc["first"]["per_stop_rate_usd"],
@@ -168,13 +176,24 @@ def seed_national_rail_schedules(cur):
     n = insert_many(cur, "national_rail_schedules",
                     ["schedule_id", "line", "service_type", "direction",
                      "origin_station_id", "destination_station_id",
-                     "stops_in_order", "passed_through_stations", "travel_time_from_origin",
+                     "passed_through_stations",
                      "first_train_time", "last_train_time",
                      "std_base_fare_usd", "std_per_stop_rate_usd",
                      "first_base_fare_usd", "first_per_stop_rate_usd",
                      "frequency_min"],
                     rows)
     print(f"  national_rail_schedules: {n} rows")
+
+    # Expand stops into the normalised national_rail_schedule_stops table.
+    stop_rows = []
+    for s in data:
+        times = s["travel_time_from_origin_min"]
+        for order, station_id in enumerate(s["stops_in_order"], start=1):
+            stop_rows.append((s["schedule_id"], station_id, order, times.get(station_id, 0)))
+    n = insert_many(cur, "national_rail_schedule_stops",
+                    ["schedule_id", "station_id", "stop_order", "travel_time_min"],
+                    stop_rows)
+    print(f"  national_rail_schedule_stops: {n} rows")
 
     day_rows = [
         (s["schedule_id"], day)

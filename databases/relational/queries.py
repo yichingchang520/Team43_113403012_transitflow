@@ -148,6 +148,11 @@ def query_national_rail_availability(
     # When travel_date is given we need seat availability as well.
     # Use a single CTE query instead of 2 extra round-trips per schedule
     # (the old approach was an N+1 pattern that scaled badly).
+    # stops_in_order is rebuilt from the national_rail_schedule_stops junction
+    # table via array_agg so the returned shape stays identical to the old JSONB
+    # design (the agent still sees an ordered list of station IDs).
+    # Origin/destination positions now come from JOINs on stop_order instead of
+    # jsonb_array_elements_text LATERAL scans.
     if travel_date:
         sql = """
             WITH seat_totals AS (
@@ -169,7 +174,6 @@ def query_national_rail_availability(
             SELECT
                 s.schedule_id, s.line, s.service_type, s.direction,
                 s.origin_station_id, s.destination_station_id,
-                s.stops_in_order, s.travel_time_from_origin,
                 s.first_train_time::text  AS first_train_time,
                 s.last_train_time::text   AS last_train_time,
                 s.std_base_fare_usd, s.std_per_stop_rate_usd,
@@ -177,7 +181,10 @@ def query_national_rail_availability(
                 s.frequency_min,
                 o_ns.name AS origin_name,
                 d_ns.name AS destination_name,
-                (d_pos.pos - o_pos.pos)::int                       AS stops_travelled,
+                (d_st.stop_order - o_st.stop_order)::int           AS stops_travelled,
+                (SELECT array_agg(ss.station_id ORDER BY ss.stop_order)
+                   FROM national_rail_schedule_stops ss
+                   WHERE ss.schedule_id = s.schedule_id)           AS stops_in_order,
                 COALESCE(st.total_seats,  0)                       AS seats_total,
                 COALESCE(bc.booked_seats, 0)                       AS seats_booked,
                 COALESCE(st.total_seats, 0)
@@ -185,21 +192,13 @@ def query_national_rail_availability(
             FROM national_rail_schedules s
             JOIN national_rail_stations o_ns ON o_ns.station_id = %(origin_id)s
             JOIN national_rail_stations d_ns ON d_ns.station_id = %(destination_id)s
-            JOIN LATERAL (
-                SELECT pos::int
-                FROM   jsonb_array_elements_text(s.stops_in_order)
-                       WITH ORDINALITY AS t(val, pos)
-                WHERE  val = %(origin_id)s
-            ) AS o_pos ON TRUE
-            JOIN LATERAL (
-                SELECT pos::int
-                FROM   jsonb_array_elements_text(s.stops_in_order)
-                       WITH ORDINALITY AS t(val, pos)
-                WHERE  val = %(destination_id)s
-            ) AS d_pos ON TRUE
+            JOIN national_rail_schedule_stops o_st
+                ON o_st.schedule_id = s.schedule_id AND o_st.station_id = %(origin_id)s
+            JOIN national_rail_schedule_stops d_st
+                ON d_st.schedule_id = s.schedule_id AND d_st.station_id = %(destination_id)s
             LEFT JOIN seat_totals    st ON st.schedule_id = s.schedule_id
             LEFT JOIN booking_counts bc ON bc.schedule_id = s.schedule_id
-            WHERE o_pos.pos < d_pos.pos
+            WHERE o_st.stop_order < d_st.stop_order
               AND s.schedule_id IN (
                   SELECT schedule_id FROM national_rail_schedule_days
                   WHERE  day_of_week = lower(to_char(%(travel_date)s::date, 'Dy'))
@@ -215,7 +214,6 @@ def query_national_rail_availability(
             SELECT
                 s.schedule_id, s.line, s.service_type, s.direction,
                 s.origin_station_id, s.destination_station_id,
-                s.stops_in_order, s.travel_time_from_origin,
                 s.first_train_time::text  AS first_train_time,
                 s.last_train_time::text   AS last_train_time,
                 s.std_base_fare_usd, s.std_per_stop_rate_usd,
@@ -223,23 +221,18 @@ def query_national_rail_availability(
                 s.frequency_min,
                 o_ns.name AS origin_name,
                 d_ns.name AS destination_name,
-                (d_pos.pos - o_pos.pos)::int AS stops_travelled
+                (d_st.stop_order - o_st.stop_order)::int AS stops_travelled,
+                (SELECT array_agg(ss.station_id ORDER BY ss.stop_order)
+                   FROM national_rail_schedule_stops ss
+                   WHERE ss.schedule_id = s.schedule_id)  AS stops_in_order
             FROM national_rail_schedules s
             JOIN national_rail_stations o_ns ON o_ns.station_id = %(origin_id)s
             JOIN national_rail_stations d_ns ON d_ns.station_id = %(destination_id)s
-            JOIN LATERAL (
-                SELECT pos::int
-                FROM   jsonb_array_elements_text(s.stops_in_order)
-                       WITH ORDINALITY AS t(val, pos)
-                WHERE  val = %(origin_id)s
-            ) AS o_pos ON TRUE
-            JOIN LATERAL (
-                SELECT pos::int
-                FROM   jsonb_array_elements_text(s.stops_in_order)
-                       WITH ORDINALITY AS t(val, pos)
-                WHERE  val = %(destination_id)s
-            ) AS d_pos ON TRUE
-            WHERE o_pos.pos < d_pos.pos
+            JOIN national_rail_schedule_stops o_st
+                ON o_st.schedule_id = s.schedule_id AND o_st.station_id = %(origin_id)s
+            JOIN national_rail_schedule_stops d_st
+                ON d_st.schedule_id = s.schedule_id AND d_st.station_id = %(destination_id)s
+            WHERE o_st.stop_order < d_st.stop_order
         """
         params = {"origin_id": origin_id, "destination_id": destination_id}
 
@@ -307,6 +300,8 @@ def query_metro_schedules(origin_id: str, destination_id: str) -> list[dict]:
         origin_id:       e.g. "MS01"
         destination_id:  e.g. "MS09"
     """
+    # stops_in_order rebuilt from metro_schedule_stops junction table via array_agg;
+    # origin/destination positions come from JOINs on stop_order.
     sql = """
         SELECT
             s.schedule_id,
@@ -314,8 +309,6 @@ def query_metro_schedules(origin_id: str, destination_id: str) -> list[dict]:
             s.direction,
             s.origin_station_id,
             s.destination_station_id,
-            s.stops_in_order,
-            s.travel_time_from_origin,
             s.first_train_time::text AS first_train_time,
             s.last_train_time::text  AS last_train_time,
             s.base_fare_usd,
@@ -323,23 +316,18 @@ def query_metro_schedules(origin_id: str, destination_id: str) -> list[dict]:
             s.frequency_min,
             o_ms.name AS origin_name,
             d_ms.name AS destination_name,
-            (d_pos.pos - o_pos.pos)::int AS stops_travelled
+            (d_st.stop_order - o_st.stop_order)::int AS stops_travelled,
+            (SELECT array_agg(ss.station_id ORDER BY ss.stop_order)
+               FROM metro_schedule_stops ss
+               WHERE ss.schedule_id = s.schedule_id) AS stops_in_order
         FROM metro_schedules s
         JOIN metro_stations o_ms ON o_ms.station_id = %(origin_id)s
         JOIN metro_stations d_ms ON d_ms.station_id = %(destination_id)s
-        JOIN LATERAL (
-            SELECT pos::int
-            FROM jsonb_array_elements_text(s.stops_in_order)
-                 WITH ORDINALITY AS t(val, pos)
-            WHERE val = %(origin_id)s
-        ) AS o_pos ON TRUE
-        JOIN LATERAL (
-            SELECT pos::int
-            FROM jsonb_array_elements_text(s.stops_in_order)
-                 WITH ORDINALITY AS t(val, pos)
-            WHERE val = %(destination_id)s
-        ) AS d_pos ON TRUE
-        WHERE o_pos.pos < d_pos.pos
+        JOIN metro_schedule_stops o_st
+            ON o_st.schedule_id = s.schedule_id AND o_st.station_id = %(origin_id)s
+        JOIN metro_schedule_stops d_st
+            ON d_st.schedule_id = s.schedule_id AND d_st.station_id = %(destination_id)s
+        WHERE o_st.stop_order < d_st.stop_order
     """
     with _connect() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -459,13 +447,20 @@ def auto_select_adjacent_seats(available_seats: list[dict], count: int) -> list[
 # ── USER & BOOKING QUERIES ────────────────────────────────────────────────────
 
 def query_user_profile(user_email: str) -> Optional[dict]:
-    """Return a user's profile by email."""
+    """Return a user's profile by email.
+
+    Includes both date_of_birth and year_of_birth: the rubric refers to
+    year_of_birth, so it is exposed directly (extracted from date_of_birth)
+    while the full date is also kept for completeness.
+    """
     with _connect() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
                 """
                 SELECT user_id, full_name, first_name, surname,
-                       email, phone, date_of_birth, registered_at, is_active
+                       email, phone, date_of_birth,
+                       EXTRACT(YEAR FROM date_of_birth)::int AS year_of_birth,
+                       registered_at, is_active
                 FROM users
                 WHERE email = %s
                 """,
@@ -617,28 +612,20 @@ def execute_booking(
                 conn.rollback()
                 return False, "This schedule does not operate on that day of the week"
 
-            # 2. Get schedule — verify origin and destination appear in stops_in_order
-            #    in the correct order using LATERAL
+            # 2. Get schedule — verify origin and destination are both stops on this
+            #    schedule in the correct order, using the junction table join.
             cur.execute(
                 """
                 SELECT s.*,
-                       o_pos.pos::int AS origin_pos,
-                       d_pos.pos::int AS dest_pos
-                FROM national_rail_schedules s,
-                LATERAL (
-                    SELECT pos
-                    FROM jsonb_array_elements_text(s.stops_in_order)
-                         WITH ORDINALITY AS t(val, pos)
-                    WHERE val = %s
-                ) AS o_pos,
-                LATERAL (
-                    SELECT pos
-                    FROM jsonb_array_elements_text(s.stops_in_order)
-                         WITH ORDINALITY AS t(val, pos)
-                    WHERE val = %s
-                ) AS d_pos
+                       o_st.stop_order AS origin_pos,
+                       d_st.stop_order AS dest_pos
+                FROM national_rail_schedules s
+                JOIN national_rail_schedule_stops o_st
+                    ON o_st.schedule_id = s.schedule_id AND o_st.station_id = %s
+                JOIN national_rail_schedule_stops d_st
+                    ON d_st.schedule_id = s.schedule_id AND d_st.station_id = %s
                 WHERE s.schedule_id = %s
-                  AND o_pos.pos < d_pos.pos
+                  AND o_st.stop_order < d_st.stop_order
                 """,
                 (origin_station_id, destination_station_id, schedule_id),
             )
