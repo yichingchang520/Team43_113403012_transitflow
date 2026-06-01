@@ -55,8 +55,8 @@ members must agree on one provider before seeding.
 ## Section 5 — AI Tool Usage Evidence
 
 ### Example 1 — Generating policy document content
-**Context:** I needed to write detailed policy text for the pgvector
-database covering refunds, tickets, pets, luggage, bikes, and accessibility.
+**Context:** I needed to add some new detailed policy text for the pgvector
+database covering lost property, accessibility, engineering works, penalty fares and renewing some details on booking rules.
 
 **Prompt:** "Write a detailed refund policy for a transit company covering
 both Metro and National Rail. Use USD currency. Reference real station
