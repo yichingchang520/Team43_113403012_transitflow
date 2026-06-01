@@ -1,0 +1,140 @@
+{
+  "version": "1.0",
+  "last_updated": "2024-01-01",
+  "delay_compensation": {
+    "overview": "TransitFlow operates a Delay Compensation Scheme for both Metro and National Rail services. Passengers who experience significant delays caused by operational failures are entitled to compensation. Compensation is not payable for delays caused by circumstances beyond TransitFlow's control, including severe weather, third-party incidents, or passenger-caused disruptions.",
+
+    "metro": {
+      "eligibility": {
+        "minimum_delay_minutes": 15,
+        "description": "Metro passengers are eligible for compensation if their journey is delayed by 15 minutes or more beyond the scheduled arrival time at their destination station, due to a service failure caused by TransitFlow operations.",
+        "excluded_causes": [
+          "Severe weather events declared by national meteorological authorities",
+          "Medical emergencies on board or at stations",
+          "Security incidents requiring service suspension",
+          "Passenger-caused disruptions",
+          "Planned engineering works announced at least 72 hours in advance"
+        ]
+      },
+      "compensation_tiers": {
+        "15_to_29_minutes": {
+          "delay_range": "15 to 29 minutes",
+          "compensation": "50% of the single ticket fare paid",
+          "example": "If you paid $1.40 for a single ticket and your journey was delayed by 20 minutes, you are entitled to $0.70 compensation."
+        },
+        "30_to_59_minutes": {
+          "delay_range": "30 to 59 minutes",
+          "compensation": "100% of the single ticket fare paid",
+          "example": "If you paid $1.40 for a single ticket and your journey was delayed by 45 minutes, you are entitled to a full refund of $1.40."
+        },
+        "60_minutes_or_more": {
+          "delay_range": "60 minutes or more",
+          "compensation": "100% of the fare paid plus a $2.00 service credit applied to your TransitFlow account",
+          "example": "If your metro journey was delayed by over 60 minutes, you receive a full fare refund plus a $2.00 credit for future travel."
+        },
+        "day_pass": {
+          "rule": "Day pass holders are eligible for a $2.00 service credit if a metro service disruption lasts 30 minutes or more and affects their intended journey. Day passes are not refunded as they cover unlimited travel."
+        }
+      },
+      "how_to_claim": {
+        "method_app": "Open the TransitFlow app, go to 'My Trips', select the affected journey, and tap 'Report a Delay'. Claims must be submitted within 14 days of the affected travel date.",
+        "method_station": "Visit any staffed metro interchange station such as Central Square (MS01) and complete a delay compensation form at the customer service desk.",
+        "required_information": [
+          "Registered email address",
+          "Date and time of travel",
+          "Origin and destination stations",
+          "Ticket type (single or day pass)",
+          "Brief description of the delay experienced"
+        ],
+        "processing_time": "Claims are reviewed within 5 business days. Approved compensation is applied to your TransitFlow account as a credit or refunded to your original payment method."
+      }
+    },
+
+    "national_rail": {
+      "eligibility": {
+        "minimum_delay_minutes": 30,
+        "description": "National Rail passengers are eligible for compensation if their scheduled service is delayed by 30 minutes or more at their destination station, or if their service is cancelled with no alternative provided within 30 minutes.",
+        "excluded_causes": [
+          "Severe weather events declared by national meteorological authorities",
+          "Industrial action by third-party operators",
+          "Trespassing or vandalism on the rail network",
+          "Medical emergencies on board",
+          "Security incidents requiring service suspension",
+          "Planned engineering works announced at least 7 days in advance"
+        ]
+      },
+      "compensation_tiers": {
+        "30_to_59_minutes": {
+          "delay_range": "30 to 59 minutes",
+          "compensation": "50% of the single journey fare paid for the delayed leg",
+          "applies_to": "Both standard and first class tickets",
+          "example": "A standard class ticket from Central Station (NR01) to North Terminal (NR05) costs $8.50. A 45-minute delay entitles you to $4.25 compensation."
+        },
+        "60_to_119_minutes": {
+          "delay_range": "60 to 119 minutes",
+          "compensation": "100% of the single journey fare paid",
+          "applies_to": "Both standard and first class tickets",
+          "example": "A first class ticket from Central Station (NR01) to Greenfield Junction (NR04) costs $11.50. A 90-minute delay entitles you to a full $11.50 refund."
+        },
+        "120_minutes_or_more": {
+          "delay_range": "120 minutes or more",
+          "compensation": "100% of the fare paid plus a $5.00 service credit applied to your TransitFlow account",
+          "note": "For delays of 2 hours or more, passengers may also request complimentary onward travel on the next available service at no charge, subject to seat availability."
+        },
+        "cancelled_service": {
+          "rule": "If a National Rail service is cancelled and no alternative service is provided within 30 minutes, passengers are entitled to a full refund of the fare paid with no processing fee, regardless of the standard cancellation policy.",
+          "stranded_passengers": "Passengers stranded at a station due to cancellation may claim reimbursement for reasonable onward transport costs (e.g. taxi fare) up to a maximum of $20.00, with a receipt."
+        }
+      },
+      "season_tickets_and_passes": {
+        "rule": "Passengers holding weekly or monthly season tickets who experience repeated delays may apply for a proportional refund at the end of the validity period.",
+        "threshold": "Compensation is available if 3 or more journeys within a single week are delayed by 30 minutes or more.",
+        "calculation": "Refund calculated as: (number of qualifying delayed journeys / total journeys in the period) × total pass cost × 50%."
+      },
+      "how_to_claim": {
+        "method_app": "Open the TransitFlow app, go to 'My Bookings', select the affected booking, and tap 'Claim Delay Compensation'. Claims must be submitted within 28 days of the affected travel date.",
+        "method_station": "Visit a staffed National Rail station such as Central Station (NR01), Parklands (NR02), or North Terminal (NR05) and complete a delay compensation form.",
+        "method_online": "Submit a claim via the TransitFlow website under 'Help & Support > Delay Compensation'.",
+        "required_information": [
+          "Booking ID (format: BK-XXXXXX)",
+          "Registered email address",
+          "Date and scheduled departure time",
+          "Origin and destination stations",
+          "Actual arrival time or confirmation that the service was cancelled",
+          "Receipts for any additional transport costs claimed (if applicable)"
+        ],
+        "processing_time": "Claims are reviewed within 10 business days. Compensation is refunded to the original payment method or applied as a service credit."
+      }
+    },
+
+    "engineering_works_and_disruption": {
+      "planned_works": {
+        "notice_period": {
+          "metro": "Planned engineering works affecting metro services will be announced at least 72 hours in advance via the TransitFlow app, station notices, and the TransitFlow website.",
+          "national_rail": "Planned engineering works affecting National Rail services will be announced at least 7 days in advance."
+        },
+        "replacement_services": "Where a full service suspension is planned, TransitFlow will provide replacement bus services between affected stations. Replacement bus timetables are published alongside the engineering works notice.",
+        "ticket_validity": "Tickets purchased for travel during a planned engineering works period remain valid for travel on replacement bus services at no extra charge.",
+        "refunds": "Passengers who choose not to travel during a planned engineering works period may claim a full refund with no processing fee, provided the claim is submitted before the travel date."
+      },
+      "unplanned_disruption": {
+        "passenger_information": "In the event of an unplanned disruption, real-time alerts are sent via the TransitFlow app and displayed on all platform information boards.",
+        "metro_suspensions": "If a metro line is fully suspended, passengers may use any available alternative metro line at no extra charge during the suspension period, even if their original ticket does not cover that line.",
+        "national_rail_suspensions": "If a National Rail service is suspended mid-journey, passengers will be transported to the nearest staffed station by replacement transport. TransitFlow will arrange onward travel at no additional cost.",
+        "compensation_eligibility": "Unplanned disruptions caused by TransitFlow operational failures qualify for delay compensation under the tiers described above. Disruptions caused by external factors (see excluded causes) do not qualify."
+      },
+      "affected_stations": {
+        "central_square_ms01": "As the primary interchange station on the Metro network, engineering works at Central Square (MS01) may affect lines M1 and M2 simultaneously. Enhanced staff presence is provided during all planned works at this station.",
+        "central_station_nr01": "As the primary National Rail hub, works at Central Station (NR01) will be communicated directly to all passengers with bookings passing through this station via email notification."
+      }
+    },
+
+    "general_conditions": {
+      "right_to_travel": "Delay compensation does not affect your right to complete your journey. Compensation is paid in addition to, not instead of, completing the booked travel.",
+      "multiple_claims": "If a journey involves both metro and national rail legs, separate claims must be submitted for each network.",
+      "fraud": "Fraudulent delay compensation claims will result in permanent account suspension and may be reported to law enforcement.",
+      "disputes": "If your claim is rejected and you disagree with the decision, you may escalate to the TransitFlow Independent Complaints Panel within 30 days of the rejection notice.",
+      "currency": "All compensation amounts are in USD. Service credits are applied in USD and may be used toward any future TransitFlow purchase."
+    }
+  }
+}

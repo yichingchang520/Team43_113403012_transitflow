@@ -12,6 +12,16 @@ Note: Gemini free tier has ~1500 requests/minute — this script makes ~13 calls
 
 Students: To extend the assistant's knowledge, add entries to the JSON files in
 train-mock-data/ and re-run this script.
+
+# TASK 6 EXTENSION:
+# Added 5 new policy documents to extend the AI assistant's knowledge:
+#   - delay_compensation_policy.json  (metro + NR delay tiers, how to claim)
+#   - lost_property_policy.json       (reporting, storage, collection, valuables)
+#   - accessibility_policy.json       (step-free, wheelchair, assistance dogs, concessions)
+#   - engineering_works_policy.json   (planned works, replacement services, passenger rights)
+#   - penalty_fares_policy.json       (penalty amounts, appeals, prosecution)
+# Each file follows the same structure as the teacher-provided policy files.
+# Each new document is loaded and embedded in the same way as existing documents.
 """
 
 import json
@@ -23,6 +33,7 @@ sys.path.insert(0, ".")
 
 from skeleton.llm_provider import llm
 from databases.relational.queries import store_policy_document
+from skeleton.config import VECTOR_SIMILARITY_THRESHOLD, VECTOR_TOP_K
 
 _DATA_DIR = os.path.normpath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "train-mock-data")
@@ -66,7 +77,7 @@ def build_documents():
             docs.append({
                 "title": f"Booking Rules — {section.replace('_', ' ').title()}",
                 "category": "booking",
-                "source_file": "booking_rules.json",
+                "source_file": "booking_rules2.json",
                 "content": _text({section: br[section]}),
             })
 
@@ -83,6 +94,8 @@ def build_documents():
 
     # lost_property_policy.json — single document
     lp = _load("lost_property_policy.json")
+    # TASK 6 EXTENSION: New policy covering lost item reporting, storage,
+    # collection procedures, and handling of valuables for metro and NR
     docs.append({
         "title": lp["label"],
         "category": "conduct",
@@ -91,6 +104,8 @@ def build_documents():
     })
 
     # accessibility_policy.json — single document
+    # TASK 6 EXTENSION: New policy covering step-free access, wheelchair users,
+    # assisted boarding, assistance dogs, priority seating, and fare concessions
     acc = _load("accessibility_policy.json")
     docs.append({
         "title": acc["label"],
@@ -100,6 +115,8 @@ def build_documents():
     })
 
     # engineering_works_policy.json — single document
+    # TASK 6 EXTENSION: New policy covering planned and unplanned disruptions,
+    # replacement services, ticket options, and passenger rights during works
     ew = _load("engineering_works_policy.json")
     docs.append({
         "title": ew["label"],
@@ -109,6 +126,8 @@ def build_documents():
     })
 
     # penalty_fares_policy.json — single document
+    # TASK 6 EXTENSION: New policy covering penalty fare amounts, fare evasion,
+    # appeals process, repeat offences, and prosecution thresholds
     pf = _load("penalty_fares_policy.json")
     docs.append({
         "title": pf["label"],
@@ -117,6 +136,20 @@ def build_documents():
         "content": _text(pf),
     })
 
+    # delay_compensation_policy.json — single document
+    # TASK 6 EXTENSION: New policy covering compensation tiers for metro and NR
+    # delays, how to claim, season ticket holders, and engineering works refunds
+    # Split into 3 smaller documents so Ollama doesn't run out of memory
+    dc = _load("delay_compensation_policy.json")
+    for section in ("metro", "national_rail", "engineering_works_and_disruption"):
+        if section in dc.get("delay_compensation", {}):
+            docs.append({
+                "title": f"Delay Compensation — {section.replace('_', ' ').title()}",
+                "category": "refund",
+                "source_file": "delay_compensation_policy.json",
+                "content": _text({section: dc["delay_compensation"][section]}),
+            })
+    
     return docs
 
 
