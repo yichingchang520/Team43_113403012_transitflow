@@ -61,14 +61,27 @@ def query_shortest_route(
 
 # ── CHEAPEST ROUTE (Dijkstra by fare) ────────────────────────────────────────
 
-def query_cheapest_route(origin_id: str, destination_id: str, fare_class: str = "standard") -> dict:
+def query_cheapest_route(
+    origin_id: str, 
+    destination_id: str, 
+    network: str = "auto", 
+    fare_class: str = "standard"
+) -> dict:
     """
     Find the cheapest route by reading the fare properties set on the edges.
     """
-    cypher = """
-    MATCH (start:Station {station_id: $orig}), (end:Station {station_id: $dest})
-    MATCH path = shortestPath((start)-[:METRO_LINK|RAIL_LINK|INTERCHANGE_TO*]-(end))
-    RETURN [n IN nodes(path) | {station_id: n.station_id, name: n.name}] AS stations,
+    # 根據網路類型決定要搜尋哪些鐵軌 (Relationships)
+    rel_types = "METRO_LINK|RAIL_LINK|INTERCHANGE_TO"
+    if network == "metro":
+        rel_types = "METRO_LINK"
+    elif network == "rail":
+        rel_types = "RAIL_LINK"
+
+    # 在 Cypher 中使用動態路徑與 CASE WHEN 來計算票價
+    cypher = f"""
+    MATCH (start:Station {{station_id: $orig}}), (end:Station {{station_id: $dest}})
+    MATCH path = shortestPath((start)-[:{rel_types}*]-(end))
+    RETURN [n IN nodes(path) | {{station_id: n.station_id, name: n.name}}] AS stations,
            reduce(total_cost = 0, r IN relationships(path) | 
                total_cost + CASE 
                    WHEN type(r) = 'RAIL_LINK' AND $fare_class = 'first' THEN coalesce(r.first_class_fare, 0)
@@ -81,6 +94,7 @@ def query_cheapest_route(origin_id: str, destination_id: str, fare_class: str = 
     
     with _driver() as driver:
         with driver.session() as session:
+            # 記得把 fare_class 作為參數傳進去 session.run
             record = session.run(cypher, orig=origin_id, dest=destination_id, fare_class=fare_class).single()
             if not record:
                 return {"found": False}
@@ -90,7 +104,6 @@ def query_cheapest_route(origin_id: str, destination_id: str, fare_class: str = 
                 "total_cost": record["total_cost"],
                 "stations": record["stations"]
             }
-
 
 # ── ALTERNATIVE ROUTES (avoiding a station) ───────────────────────────────────
 
