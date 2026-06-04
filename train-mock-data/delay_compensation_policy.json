@@ -1,4 +1,5 @@
 {
+  "label": "Delay Compensation Policy",
   "version": "1.0",
   "last_updated": "2024-01-01",
   "delay_compensation": {
