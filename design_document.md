@@ -268,11 +268,6 @@ def query_delay_ripple(delayed_station_id: str, hops: int = 2) -> list[dict]:
     # ... 連線與 Session 執行邏輯 ...
 ```
 
-### 3.4 結論與架構權衡 (Trade-offs & Reflections)
-在 TransitFlow 的整體架構中，我們做了一次非常經典的資料冗餘權衡（Denormalization Trade-off）。
-依據傳統關聯式資料庫的正規化理論（如 3NF），車票票價（Fares）屬於頻繁變動、具備多種規則的營運數據，理應「唯一」存放在 PostgreSQL 中，以維護資料一致性並防止更新異常。 然而，如果圖形資料庫只純粹存放車站連線，當使用者需要尋找最便宜路線時，Neo4j 每往前走一步（Edge Step），都必須透過外部網路或中介層去向 PostgreSQL 查詢該路段的當前票價。這會帶來嚴重的跨資料庫查詢（Cross-DB Distributed Query）效能災難。
-因此，在 Task 4 的資料匯入（seed_neo4j.py）設計中，我們選擇打破正規化規則，故意在 Neo4j 的關係邊上複製、反正規化了一份票價權重（fare, standard_fare, first_class_fare）。雖然這帶來了微幅的資料冗餘與維護同步的挑戰，但它讓 Neo4j 能夠在完全獨立的拓樸圖內，直接利用內部關係屬性進行 Dijkstra 或 Reduce 累積運算。這種以空間（微幅冗餘數據）換取極致時間（毫秒級尋路回應）的決策，正是本專案圖形化資料庫設計能兼具工業級效能與工程優雅的核心關鍵。
-
 ## Section 4 — Vector / RAG Design
 
 ### What is embedded and why cosine similarity
@@ -370,6 +365,11 @@ to use the project's required pattern.
 
 
 ## Section 6 — Reflection & Trade-offs
+
+### Trade Off: Graph Database Design 
+在 TransitFlow 的整體架構中，我們做了一次非常經典的資料冗餘權衡（Denormalization Trade-off）。
+依據傳統關聯式資料庫的正規化理論（如 3NF），車票票價（Fares）屬於頻繁變動、具備多種規則的營運數據，理應「唯一」存放在 PostgreSQL 中，以維護資料一致性並防止更新異常。 然而，如果圖形資料庫只純粹存放車站連線，當使用者需要尋找最便宜路線時，Neo4j 每往前走一步（Edge Step），都必須透過外部網路或中介層去向 PostgreSQL 查詢該路段的當前票價。這會帶來嚴重的跨資料庫查詢（Cross-DB Distributed Query）效能災難。
+因此，在 Task 4 的資料匯入（seed_neo4j.py）設計中，我們選擇打破正規化規則，故意在 Neo4j 的關係邊上複製、反正規化了一份票價權重（fare, standard_fare, first_class_fare）。雖然這帶來了微幅的資料冗餘與維護同步的挑戰，但它讓 Neo4j 能夠在完全獨立的拓樸圖內，直接利用內部關係屬性進行 Dijkstra 或 Reduce 累積運算。這種以空間（微幅冗餘數據）換取極致時間（毫秒級尋路回應）的決策，正是本專案圖形化資料庫設計能兼具工業級效能與工程優雅的核心關鍵。
 
 ### Trade-off: Embedding provider lock-in
 We chose vector(768) for Ollama nomic-embed-text because it runs
