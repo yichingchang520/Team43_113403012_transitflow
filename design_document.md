@@ -471,6 +471,6 @@ all of which returned correct policy-grounded answers:
 
 ![TransitFlow Vector Diagram1](penalty_fare.png)
 ![TransitFlow Vector Diagram2](penalty_fare2.png)
-![TransitFlow Vector Diagram3](delay_compensation1.png)
+![TransitFlow Vector Diagram3](delay_compensation1.jpg)
 ![TransitFlow Vector Diagram4](delay_compensation2.png)
 ![TransitFlow Vector Diagram5](delay_compensation3.png)
