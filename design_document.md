@@ -48,17 +48,18 @@ CREATE CONSTRAINT FOR (s:Station) REQUIRE s.station_id IS UNIQUE;
 
 此設計同時保證了資料匯入的冪等性（Idempotency）——無論執行幾次 `seed_neo4j.py`，圖形中每個車站都只會存在唯一一個節點。
 
-3.2 圖形資料庫設計原理與抉擇 (Design Rationale)
-3.2.1 免索引鄰接（Index-Free Adjacency）與效能優勢
+### 3.2 圖形資料庫設計原理與抉擇 (Design Rationale)
+#### 3.2.1 免索引鄰接（Index-Free Adjacency）與效能優勢
 在關聯式資料庫（PostgreSQL）中，若要計算一條跨越多個車站、包含多次轉乘的複雜路線，必須對鄰接表執行多層的遞迴自我連接（Recursive Self-Joins / CTEs）。隨著路徑深度的增加（如超過 5 跳以上），SQL 的 B-Tree 索引對照與連接運算成本會呈現指數型增長，造成嚴重的查詢延遲。
 相較之下，Neo4j 採用了免索引鄰接（Index-Free Adjacency）技術。每個車站節點在記憶體中直接持有指向其相鄰有向關係邊的記憶體指標（Pointers）。在執行 Dijkstra 尋路演算法時，系統只需沿著指標直接跳轉，尋路的時間複雜度僅與「路徑本身的長度」相關，而與整個系統內有多少條班表、幾百萬筆歷史搭乘紀錄完全無關，從而在毫秒級內提供流暢的線路推薦。
-3.2.2 雙重標籤（Dual Labels）的尋路優化
-若僅設計單一標籤（如單純使用 :MetroStation），在執行跨系統混合寻路時，Cypher 語法必須使用代價極高的全圖掃描：MATCH (n) WHERE n:MetroStation OR n:NationalRailStation。 藉由引入全局通用的 :Station 標籤，跨路網的 Dijkstra 規劃可以精準限縮在 MATCH (start:Station)-[...]-(end:Station) 的索引範圍內；而當 AI 助理明確指定要尋找地鐵線路時，又可利用 MATCH (m:MetroStation) 快速收斂，在「全局混合互通」與「區域專精過濾」之間取得了最佳的架構平衡。
-3.2.3 轉乘懲罰（Interchange Penalty）的常理約束
+#### 3.2.2 雙重標籤（Dual Labels）的尋路優化
+若僅設計單一標籤（如單純使用 :MetroStation），在執行跨系統混合尋路時，Cypher 語法必須使用代價極高的全圖掃描：MATCH (n) WHERE n:MetroStation OR n:NationalRailStation。 藉由引入全局通用的 :Station 標籤，跨路網的 Dijkstra 規劃可以精準限縮在 MATCH (start:Station)-[...]-(end:Station) 的索引範圍內；而當 AI 助理明確指定要尋找地鐵線路時，又可利用 MATCH (m:MetroStation) 快速收斂，在「全局混合互通」與「區域專精過濾」之間取得了最佳的架構平衡。
+#### 3.2.3 轉乘懲罰（Interchange Penalty）的常理約束
 在真實交通系統中，地鐵換乘火車是需要花費時間步行通過地下道或月台的。若在圖中將轉乘關係的時間成本設為 0，最短路徑演算法在累積權重時，會傾向規劃出許多「為了節省 1 分鐘行車時間，而要求乘客瘋狂轉乘 3 次」的不符合人類常理的極端捷徑。 因此，我們在 :INTERCHANGE_TO 關係邊上，強制實作了 walking_time_min = 5 的屬性。每當演算法跨越一次網路邊界，總時間就會自動累加 5 分鐘，從而強迫演算法優先選擇更平穩、更符合人類現實通勤習慣的優質路線。
-3.3 核心查詢函式實作與原理解析 (Query Implementation)
+
+### 3.3 核心查詢函式實作與原理解析 (Query Implementation)
 以下為 databases/graph/queries.py 中負責核心交通調度的三大函式，整合了對助教指出之 Bug #3 與 Bug #4 的深度重構。
-3.3.1 最快路徑查詢 (query_shortest_route)
+#### 3.3.1 最快路徑查詢 (query_shortest_route)
 本函式採用 Neo4j 官方高性能生產級插件 apoc.algo.dijkstra，以物理行車時間 travel_time_min 為權重。
 
 ```Python
@@ -77,10 +78,11 @@ def query_shortest_route(origin_id: str, destination_id: str, network: str = "au
     # ... 連線與 Session 執行邏輯 ...
 ```
 
-3.3.2 最便宜路徑查詢 (query_cheapest_route) —— 修正 Bug #3
-原始缺陷： 原始程式碼雖然接收了 fare_class 和 network 參數，但在 Cypher 中完全被無視，導致系統無法根據「標準艙」或「頭等艙」區分價格。
-設計與語意優化： 本函式在 Cypher 中引入了 reduce() 累積器 與 CASE WHEN 條件分支語法，完美解決參數閒置之缺陷。
-工程語意澄清（拓樸約束）： 在實作上，本查詢首先利用 shortestPath() 篩選出拓樸結構上「站數最少/轉乘最少」的最短路網線路，隨後透過累積器精算該特定路徑在指定艙等（standard 或 first）下的總票價成本。此設計高度符合真實大眾運輸乘客「在首要確保轉乘次數與站數最少的前提下，尋求該理想路線之最經濟艙等票價」的通勤行為學特徵，且能完美滿足 AIFall-back 路由層對結構化票價比對的要求。
+#### 3.3.2 最便宜路徑查詢 (query_cheapest_route) —— 修正 Bug #3
+
+1. 原始缺陷： 原始程式碼雖然接收了 fare_class 和 network 參數，但在 Cypher 中完全被無視，導致系統無法根據「標準艙」或「頭等艙」區分價格。
+2. 設計與語意優化： 本函式在 Cypher 中引入了 reduce() 累積器 與 CASE WHEN 條件分支語法，完美解決參數閒置之缺陷。
+3. 工程語意澄清（拓樸約束）： 在實作上，本查詢首先利用 shortestPath() 篩選出拓樸結構上「站數最少/轉乘最少」的最短路網線路，隨後透過累積器精算該特定路徑在指定艙等（standard 或 first）下的總票價成本。此設計高度符合真實大眾運輸乘客「在首要確保轉乘次數與站數最少的前提下，尋求該理想路線之最經濟艙等票價」的通勤行為學特徵，且能完美滿足 AIFall-back 路由層對結構化票價比對的要求。
 
 ```Python
 def query_cheapest_route(origin_id: str, destination_id: str, network: str = "auto", fare_class: str = "standard") -> dict:
@@ -104,9 +106,9 @@ def query_cheapest_route(origin_id: str, destination_id: str, network: str = "au
     # ... 連線與 Session 執行邏輯 ...
 ```
 
-3.3.3 延誤影響範圍擴散分析 (query_delay_ripple) —— 修正 Bug #4
-原始缺陷： 原程式碼直接將擴散步數透過 f-string 渲染進 Cypher 的變動長度路徑 -[*1..{hops}]- 中。若前端或自動化測試檔傳入極端參數 hops = 0，語法會被渲染成非法且矛盾的 -[*1..0]-（下限大於上限），進而觸發 Neo4j 核心語法解析潰敗，導致整個後端服務報錯崩潰。
-防護實作： 我們在 Python 邏輯層加入了「早期攔截（Early Return）」安全閘門。一旦偵測到 hops <= 0，直接回傳空陣列 []，從根本上阻斷非法語法傳入資料庫，確保系統具備 100% 的抗崩潰強健性。
+#### 3.3.3 延誤影響範圍擴散分析 (query_delay_ripple) —— 修正 Bug #4
+1. 原始缺陷： 原程式碼直接將擴散步數透過 f-string 渲染進 Cypher 的變動長度路徑 -[*1..{hops}]- 中。若前端或自動化測試檔傳入極端參數 hops = 0，語法會被渲染成非法且矛盾的 -[*1..0]-（下限大於上限），進而觸發 Neo4j 核心語法解析潰敗，導致整個後端服務報錯崩潰。
+2. 防護實作： 我們在 Python 邏輯層加入了「早期攔截（Early Return）」安全閘門。一旦偵測到 hops <= 0，直接回傳空陣列 []，從根本上阻斷非法語法傳入資料庫，確保系統具備 100% 的抗崩潰強健性。
 
 ```Python
 def query_delay_ripple(delayed_station_id: str, hops: int = 2) -> list[dict]:
@@ -124,7 +126,7 @@ def query_delay_ripple(delayed_station_id: str, hops: int = 2) -> list[dict]:
     # ... 連線與 Session 執行邏輯 ...
 ```
 
-3.4 結論與架構權衡 (Trade-offs & Reflections)
+### 3.4 結論與架構權衡 (Trade-offs & Reflections)
 在 TransitFlow 的整體架構中，我們做了一次非常經典的資料冗餘權衡（Denormalization Trade-off）。
 依據傳統關聯式資料庫的正規化理論（如 3NF），車票票價（Fares）屬於頻繁變動、具備多種規則的營運數據，理應「唯一」存放在 PostgreSQL 中，以維護資料一致性並防止更新異常。 然而，如果圖形資料庫只純粹存放車站連線，當使用者需要尋找最便宜路線時，Neo4j 每往前走一步（Edge Step），都必須透過外部網路或中介層去向 PostgreSQL 查詢該路段的當前票價。這會帶來嚴重的跨資料庫查詢（Cross-DB Distributed Query）效能災難。
 因此，在 Task 4 的資料匯入（seed_neo4j.py）設計中，我們選擇打破正規化規則，故意在 Neo4j 的關係邊上複製、反正規化了一份票價權重（fare, standard_fare, first_class_fare）。雖然這帶來了微幅的資料冗餘與維護同步的挑戰，但它讓 Neo4j 能夠在完全獨立的拓樸圖內，直接利用內部關係屬性進行 Dijkstra 或 Reduce 累積運算。這種以空間（微幅冗餘數據）換取極致時間（毫秒級尋路回應）的決策，正是本專案圖形化資料庫設計能兼具工業級效能與工程優雅的核心關鍵。
