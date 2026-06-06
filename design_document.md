@@ -469,5 +469,5 @@ all of which returned correct policy-grounded answers:
 - "I got a fine on the metro" → Penalty Fares policy
 - "There are engineering works on my route" → Engineering Works policy
 
-![TransitFlow Vector Diagram1]("Screenshot 2026-06-04 155201.png")
-![TransitFlow Vector Diagram1]("Screenshot 2026-06-04 155209.png")
+![TransitFlow Vector Diagram1](penalty_fare.png)
+![TransitFlow Vector Diagram2](penalty_fare2.png)
