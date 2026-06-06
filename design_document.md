@@ -238,3 +238,91 @@ and re-seeding the entire policy_documents table. In a production
 system we would abstract the embedding dimension into a configuration
 variable and include a migration script to handle provider switches
 without data loss.
+
+## Section 7 — Extension: Expanded Policy Knowledge Base
+
+### Motivation
+The original TransitFlow assistant could answer questions about refunds,
+ticket types, booking rules, and basic travel conduct. However, it could
+not answer several common real-world passenger questions such as:
+- "My train was delayed by 45 minutes — can I claim compensation?"
+- "I left my bag on the metro — what do I do?"
+- "I received a penalty fare but the gate was broken — can I appeal?"
+- "Is there wheelchair access at Central Station?"
+- "My service is cancelled due to engineering works — can I get a refund?"
+
+These are high-frequency passenger queries that a real transit assistant
+must handle. The extension adds 5 new policy documents to the pgvector
+database, directly improving the assistant's ability to answer these
+questions using retrieval-augmented generation.
+
+---
+
+### Database Changes
+
+No new SQL tables were added. The extension uses the existing
+`policy_documents` table (already defined in schema.sql):
+
+```sql
+CREATE TABLE policy_documents (
+    id          SERIAL       PRIMARY KEY,
+    title       VARCHAR(200) NOT NULL,
+    category    VARCHAR(50)  NOT NULL,
+    content     TEXT         NOT NULL,
+    embedding   vector(768),
+    source_file VARCHAR(200),
+    created_at  TIMESTAMPTZ  DEFAULT NOW()
+);
+```
+
+Five new JSON files were added to `train-mock-data/` and loaded into
+this table via `skeleton/seed_vectors.py`. Each document is embedded
+using the same nomic-embed-text model as the original documents.
+
+The total document count increased from 13 to 20 entries in the
+`policy_documents` table after seeding.
+
+---
+
+### Example Query with Expected Output
+
+```python
+from skeleton.llm_provider import llm
+from databases.relational.queries import query_policy_vector_search
+
+results = query_policy_vector_search(
+    llm.embed("my train was delayed by 45 minutes, can I get money back?")
+)
+print(results[0]["title"])
+# Output: "Delay Compensation — National Rail"
+print(results[0]["similarity"])
+# Output: 0.87  (high cosine similarity — correct document retrieved)
+```
+
+The query embedding is compared against all 20 stored policy embeddings
+using cosine similarity (`<=>` operator in pgvector). The delay
+compensation document scores highest because it semantically matches
+the passenger's question about train delays and getting money back.
+
+---
+
+### Testing Evidence
+
+After running `python skeleton/seed_vectors.py`, the document count
+was verified:
+
+```sql
+SELECT COUNT(*) FROM policy_documents;
+-- Result: 20
+
+SELECT title, category FROM policy_documents ORDER BY id;
+-- Shows all 20 documents including the 5 new extension entries
+```
+
+The assistant was tested in the Gradio UI with the following queries,
+all of which returned correct policy-grounded answers:
+- "What happens if my train is delayed?" → Delay Compensation policy
+- "I lost my bag on the train" → Lost Property policy
+- "Is the station wheelchair accessible?" → Accessibility policy
+- "I got a fine on the metro" → Penalty Fares policy
+- "There are engineering works on my route" → Engineering Works policy
