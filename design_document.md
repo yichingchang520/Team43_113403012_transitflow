@@ -1,3 +1,116 @@
+## Section 2 — Normalisation Justification
+
+這一節說明我們在設計關聯式 schema（`databases/relational/schema.sql`）時，
+做了哪些正規化的決定、為什麼這樣設計，以及有哪些地方我們刻意選擇不完全正規化。
+最後也會說明密碼是怎麼儲存的。
+
+### 2.1 正規化決策與函數相依（達到 3NF）
+
+我們在設計表格時，主要的目標是讓資料庫達到第三正規化（3NF），
+過程中其實是一層一層處理上來的。
+
+一開始看原始的 JSON 資料，我們發現有些欄位天生就是「一對多」的，
+例如一個班次（schedule）會經過很多個停靠站、會在好幾個營運日行駛，
+一個車站也可能屬於不只一條路線。如果照原本 JSON 的樣子，直接把停靠站存成一個陣列欄位
+（像是 `stops_in_order`），那這個欄位裡面就會有多個值，這樣會違反第一正規化（1NF），
+因為 1NF 要求每一格都只能放一個單元值（atomic value），而且之後也很難用 SQL 去查
+「某班次的第幾站」這種問題。
+
+所以我們把這些多值屬性（multivalued attribute）拆出來，各自做成獨立的接合表（junction table）：
+
+- 停靠站：`metro_schedule_stops`、`national_rail_schedule_stops`（一列代表一個停靠站）
+- 營運日：`metro_schedule_days`、`national_rail_schedule_days`（一列代表一天）
+- 路線：`metro_station_lines`、`national_rail_station_lines`（一列代表一組「車站＋路線」）
+
+以停靠站表為例，它的主鍵是複合鍵（composite key）`(schedule_id, stop_order)`，
+也就是說「哪一個班次、第幾站」這兩個合起來才能唯一決定一筆停靠資料。
+它的函數相依（functional dependency）可以寫成：
+
+```
+(schedule_id, stop_order) → station_id, travel_time_min
+```
+
+這裡可以看到 `travel_time_min`（從起站算起的累計分鐘）一定要同時知道「哪一班」和「第幾站」
+才能決定，不會只靠 `schedule_id` 或只靠 `stop_order` 其中一個就決定，
+所以沒有部分相依（partial dependency），符合第二正規化（2NF）。
+另外我們也加了 `UNIQUE(schedule_id, station_id)`，避免同一個班次裡同一個車站出現兩次
+（因為這個系統的路線不是環狀的，所以這個限制是合理的）。
+
+再來是第三正規化（3NF），重點是不能有遞移相依（transitive dependency），
+也就是非鍵欄位不可以透過另一個非鍵欄位間接決定。
+我們最明顯的做法是：車站的名稱只存在 `metro_stations` 和 `national_rail_stations` 這兩張表，
+其他像班次的停靠站表只存 `station_id`、訂位與行程則存 `origin_station_id`／`destination_station_id`（都是外鍵 FK），要顯示名稱的時候再用 JOIN 去抓。
+如果我們偷懶把 `station_name` 也複製一份到 `bookings` 裡面，
+就會變成 `booking_id → origin_station_id → origin_station_name`（`destination_station_id` 同理）這種遞移相依，
+之後車站一改名，就要好幾個地方一起改，很容易出現不一致。把名稱集中在一張表就不會有這個問題。
+
+主鍵的部分，像 `station_id`、`schedule_id` 這些本來在原始資料裡就有、而且外部有意義、又不會變動，
+我們就直接拿來當主鍵（屬於自然鍵 natural key）。
+但 `coaches` 和 `seats` 比較特別，車廂代號（例如 "A"）或座位代號（例如 "A05"）
+只有在它的上一層裡面才唯一，不能單獨當主鍵，所以我們改用 SERIAL 自動編號當代理鍵（surrogate key），
+再用 `UNIQUE(layout_id, coach)`、`UNIQUE(coach_id, seat_id)` 來保證在各自範圍內不重複。
+
+### 2.2 刻意的去正規化取捨（de-normalisation）
+
+雖然我們盡量做到 3NF，但有幾個地方我們是故意「不」完全正規化的，因為這樣比較合理：
+
+**(1) `users.full_name`**
+這個欄位是用 `first_name || ' ' || surname` 算出來的，嚴格來說它可以由其他欄位推導，
+算是違反 3NF 的冗餘。但我們是用 PostgreSQL 的 `GENERATED ALWAYS AS (...) STORED`，
+讓資料庫自己去維護它，不是我們手動填，所以它永遠會跟名字保持一致，
+我們覺得這個方便性值得，而且沒有不一致的風險。
+
+**(2) 訂位的金額和座位（`bookings.amount_usd`、`coach`、`seat_id`）**
+票價其實可以從 `national_rail_schedules` 裡的票價欄位加上停靠數即時算出來，
+但我們選擇把成交當下的金額直接存進訂位紀錄裡。
+原因是訂位是一種財務／紀錄性質的資料，如果之後票價調整了，
+舊的訂單金額也不應該跟著變，所以我們把它當成「當下的快照」存起來。
+座位也是一樣，我們存的是當時訂到的座位字串，而不是去連 `seats` 表的外鍵。
+（座位雖以字串快照保存，但完整性仍有保障：我們另用部分唯一索引
+`idx_prevent_double_booking (schedule_id, travel_date, coach, seat_id)`
+防止同一班次、同一天、同一座位被重複訂位。）
+這裡我們是選擇「保留正確的歷史紀錄」而不是「最少的重複」。
+
+**(3) `national_rail_schedules.passed_through_stations` 以 JSONB 保留**
+有些國鐵班次會「通過但不停靠」某些車站，我們把這份清單以 JSONB 欄位保留，沒有再拆成獨立的表。
+原因是這個欄位純粹是資訊性質的，系統不會對它逐站做過濾或關聯查詢
+（真正會被查的停靠站已經放進 `national_rail_schedule_stops`），拆表的成本大於效益，
+保留為半結構化的 JSONB 反而更務實。
+
+這幾個地方都是我們衡量過之後，覺得簡單和正確性比完全消除冗餘更重要才這樣做的。
+另外，`payments` 與 `feedback` 各自可指向訂位或地鐵行程，我們以**互斥弧（exclusive arc）**搭配
+`CHECK` 約束保證 `booking_id` 與 `metro_trip_id` 恰好其一非空，而不是硬拆成兩張表、也不用可空的多型外鍵——
+這同樣是在正確性與結構簡潔之間做的取捨。
+
+### 2.3 密碼雜湊（password hashing）
+
+使用者的密碼我們沒有用明文存，而是用 **Argon2id** 演算法做雜湊之後才存進
+`user_credentials.password_hash`（用的是 `argon2-cffi` 套件的 `PasswordHasher()`，依套件預設即為 Argon2id；
+註冊時呼叫 `_ph.hash()`，登入時用 `_ph.verify()` 驗證）。
+
+我們會選 Argon2id 而不是 MD5 或 SHA-1，是因為 MD5 和 SHA-1 這類雜湊本來是設計來「算很快」的，
+但密碼雜湊剛好相反，我們希望它「慢」。現在的 GPU 一秒可以試非常多組密碼，
+如果用 MD5/SHA-1，攻擊者很容易就能暴力破解或用字典攻擊。
+Argon2id 是 2015 年密碼雜湊競賽的冠軍，它被設計成不只慢、還很吃記憶體（memory-hard），
+而且可以調整時間成本和記憶體成本（也就是 key stretching），
+這樣可以大幅拉高每一次嘗試的成本，也讓攻擊者沒辦法靠 GPU 大量平行破解佔便宜。
+
+另外一個重點是 salt。Argon2 在每次做雜湊的時候，都會自動產生一段隨機的 salt，
+並且把這段 salt 跟參數一起存在雜湊結果的字串裡（驗證的時候會再讀回來，所以不用我們自己另外存）。
+因為每個人的 salt 都不一樣，所以就算有兩個使用者剛好設了一模一樣的密碼，
+他們存進資料庫的雜湊值還是會完全不同。這一點很重要，
+因為這樣攻擊者就沒辦法用事先算好的彩虹表（rainbow table）一次比中很多帳號，
+也不能破解一個就套用到所有相同密碼的人，他必須針對每一個 salt 重新慢慢試，攻擊成本就高很多。
+
+除了密碼以外，我們也用同一套 Argon2id 把使用者的**密保答案（secret answer）一併雜湊**後才存進
+`user_credentials.secret_answer`（雜湊前先做 `.strip().lower()` 正規化，讓比對不受大小寫與多餘空白影響），
+驗證時同樣用 `_ph.verify()`，所以密保答案在資料庫裡也不是明文。
+此外，`user_credentials` 另設一個 `hashing_algorithm` 欄位（`DEFAULT 'argon2id'`），
+用意是日後若更換雜湊演算法，可據此辨識每筆雜湊是用哪種演算法產生的、以利平滑遷移；
+目前是靠欄位的預設值帶入（`register_user()` 的 INSERT 並未逐筆顯式寫入），屬於為未來預留的設計。
+
+---
+
 ## Section 3 — Graph Database Design Rationale
 
 ### 3.1 圖形資料庫綱要設計 (Graph Schema Topology)
