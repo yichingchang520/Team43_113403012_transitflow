@@ -366,6 +366,12 @@ to use the project's required pattern.
 
 ## Section 6 — Reflection & Trade-offs
 
+### Trade Off: Relational Database Design
+
+在關聯式資料庫的設計上，我們做了幾個關鍵的取捨。第一個是主鍵策略：我們並沒有一律採用 SERIAL 或 UUID，而是依「該識別碼本身是否具備外部意義且終身穩定」來逐表決定。對 `station_id`、`schedule_id` 這類來源資料既有的識別碼，我們直接沿用為自然鍵（Natural Key）——它們不僅外部可讀、終身不變，更與 Neo4j 圖節點的 `station_id` 完全一致，使得跨資料庫的查詢串聯無需任何額外的 ID 映射層（Mapping Layer）。然而對於 `coaches` 與 `seats`，其標籤（如車廂 "A"、座位 "A05"）僅在其父層範圍內唯一，無法獨立識別一筆資料，因此我們改用 SERIAL 代理鍵（Surrogate Key），再輔以 `UNIQUE(layout_id, coach)` 與 `UNIQUE(coach_id, seat_id)` 約束維持局部唯一性。這種「因表制宜」而非一刀切的設計，讓我們在跨系統一致性與資料正確性之間取得了精準的平衡。
+
+第二個關鍵取捨是訂位的併發控制（Concurrency Control）。售票系統最致命的風險，莫過於兩位使用者在同一瞬間搶訂同一個座位所造成的競爭條件（Race Condition）。倘若僅依賴應用層「先查詢空位、再寫入訂位」的邏輯，在高併發情境下將浮現典型的 TOCTOU（Time-of-Check to Time-of-Use）漏洞——兩個交易可能同時讀到同一個空位、雙雙判定為可訂。因此我們在 `execute_booking()` 中將交易隔離等級提升至最嚴格的 SERIALIZABLE，並在資料庫層再佈下第二道防線：一個部分唯一索引 `idx_prevent_double_booking (schedule_id, travel_date, coach, seat_id)`（僅約束 `confirmed` 與 `completed` 狀態）。如此一來，即使應用層的檢查同時放行，資料庫仍會在寫入階段強制攔截重複售位，再由程式捕捉 `SerializationFailure` 並請使用者重試。這是一個「以效能換取絕對正確性」的審慎決策——SERIALIZABLE 的成本確實較高，但在攸關金流的售票場景中，資料一致性正是不可妥協的底線。（其餘如將成交金額與座位以快照寫入 `bookings`、以及 `users` 與 `user_credentials` 的 1:1 垂直切分以縮小機密欄位存取面等取捨，詳見 Section 2。）
+
 ### Trade Off: Graph Database Design 
 在 TransitFlow 的整體架構中，我們做了一次非常經典的資料冗餘權衡（Denormalization Trade-off）。
 依據傳統關聯式資料庫的正規化理論（如 3NF），車票票價（Fares）屬於頻繁變動、具備多種規則的營運數據，理應「唯一」存放在 PostgreSQL 中，以維護資料一致性並防止更新異常。 然而，如果圖形資料庫只純粹存放車站連線，當使用者需要尋找最便宜路線時，Neo4j 每往前走一步（Edge Step），都必須透過外部網路或中介層去向 PostgreSQL 查詢該路段的當前票價。這會帶來嚴重的跨資料庫查詢（Cross-DB Distributed Query）效能災難。
