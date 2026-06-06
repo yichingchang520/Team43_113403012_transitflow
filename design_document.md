@@ -1,3 +1,32 @@
+## Section 1 — Entity-Relationship Diagram
+
+TransitFlow 的關聯式資料庫共有 19 張表，分成六個邏輯群組：使用者與憑證、車站（含路線）、
+班次（含停靠站與營運日）、座位佈局（佈局／車廂／座位）、交易（訂位與地鐵行程），以及付款與評價。
+下圖以 dbdiagram.io 產生，每條關係線上都標有 cardinality（crow's-foot 記號與 `0..1` / `*`），
+每個實體都列出主鍵（PK）、外鍵（FK）與代表性資料欄位。
+
+![TransitFlow ER Diagram](erd-snowflake.png)
+
+### 1.1 主要關係與 Cardinality
+
+| 關係 | Cardinality | 說明 |
+|---|---|---|
+| users — user_credentials | 1 : 1 | 共用主鍵（shared-PK），憑證與個資垂直切分 |
+| users — bookings／metro_trips／feedback | 1 : N | 一位使用者有多筆交易與評價 |
+| metro_stations — metro_station_lines | 1 : N | 一站可屬多條路線（多值屬性拆表） |
+| metro_schedules — metro_schedule_stops | 1 : N | 一班次有多個停靠站（解決班次↔車站 M:N） |
+| metro_schedules — metro_schedule_days | 1 : N | 一班次行駛於多個營運日 |
+| national_rail_schedules → seat_layouts → coaches → seats | 1 : N（逐層） | 佈局→車廂→座位三層階層 |
+| national_rail_schedules — bookings | 1 : N | 一班次有多筆訂位 |
+| metro_trips — metro_trips（day_pass_ref） | 1 : N（自關聯） | 日票母行程串接其子行程 |
+| bookings／metro_trips — payments | 1 : 0..1 | 一筆交易最多一筆付款（互斥弧） |
+| bookings／metro_trips — feedback | 1 : 0..1 | 一筆交易最多一則評價（互斥弧＋唯一索引） |
+| metro_stations — national_rail_stations | 0..1 : 0..1 | 跨網轉乘指標（互指，ON DELETE SET NULL） |
+
+> 完整的欄位、型別與 PK/FK 標註請見上方 ER 圖；cardinality 記號直接標在每條關係線上。
+
+---
+
 ## Section 2 — Normalisation Justification
 
 這一節說明我們在設計關聯式 schema（`databases/relational/schema.sql`）時，
