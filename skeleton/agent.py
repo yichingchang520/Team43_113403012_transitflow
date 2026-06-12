@@ -249,6 +249,7 @@ TOOLS = [
             "destination_id": {"type": "string", "description": "Station ID e.g. MS09 or NR05"},
             "network":        {"type": "string", "description": "metro, rail, or auto (default auto — inferred from IDs)"},
             "optimise_by":    {"type": "string", "description": "time (fastest, default) or cost (cheapest)"},
+            "fare_class":     {"type": "string", "description": "standard (default) or first — only affects rail cost when optimise_by='cost'"},
         },
         "required": ["origin_id", "destination_id"],
     },
@@ -399,6 +400,7 @@ def _execute_tool(
             destination_id = params["destination_id"]
             network        = params.get("network", "auto")
             optimise_by    = params.get("optimise_by", "time")
+            fare_class     = params.get("fare_class", "standard")
 
             # Detect cross-network routing (one MS, one NR)
             is_cross = (
@@ -413,6 +415,7 @@ def _execute_tool(
                     origin_id=origin_id,
                     destination_id=destination_id,
                     network=network,
+                    fare_class=fare_class,
                 )
             else:
                 result = query_shortest_route(
@@ -595,6 +598,7 @@ USER: "{_augmented_message}"
 Examples:
 "fastest route MS01 to MS14" -> {{"tool_calls": [{{"name": "find_route", "params": {{"origin_id": "MS01", "destination_id": "MS14", "optimise_by": "time"}}}}]}}
 "cheapest NR01 to NR05" -> {{"tool_calls": [{{"name": "find_route", "params": {{"origin_id": "NR01", "destination_id": "NR05", "optimise_by": "cost"}}}}]}}
+"cheapest first class NR01 to NR05" -> {{"tool_calls": [{{"name": "find_route", "params": {{"origin_id": "NR01", "destination_id": "NR05", "optimise_by": "cost", "fare_class": "first"}}}}]}}
 "trains NR01 to NR03 on 2025-06-01" -> {{"tool_calls": [{{"name": "check_national_rail_availability", "params": {{"origin_id": "NR01", "destination_id": "NR03", "travel_date": "2025-06-01"}}}}]}}
 "refund policy" -> {{"tool_calls": [{{"name": "search_policy", "params": {{"query": "refund policy"}}}}]}}
 "hello" -> {{"tool_calls": []}}
@@ -665,8 +669,10 @@ JSON:"""
     )
     if _is_route and _two_stations and not _tool_selected("find_route", "origin_id", "destination_id"):
         _opt = "cost" if any(kw in _lower for kw in ["cheap", "cheapest", "lowest cost"]) else "time"
+        _fc = "first" if any(kw in _lower for kw in ["first class", "first-class", "頭等"]) else "standard"
         _fallback("find_route",
-                  {"origin_id": _station_ids[0].upper(), "destination_id": _station_ids[1].upper(), "optimise_by": _opt},
+                  {"origin_id": _station_ids[0].upper(), "destination_id": _station_ids[1].upper(),
+                   "optimise_by": _opt, "fare_class": _fc},
                   "route query")
 
     # 2. Availability / trains / schedules between two stations
