@@ -408,15 +408,20 @@ def _execute_tool(
                 (origin_id.upper().startswith("NR") and destination_id.upper().startswith("MS"))
             )
 
-            if is_cross:
-                result = query_interchange_path(origin_id, destination_id)
-            elif optimise_by == "cost":
+            # Cost takes priority over is_cross: query_cheapest_route already
+            # traverses METRO_LINK|RAIL_LINK|INTERCHANGE_TO, so it handles
+            # cross-network journeys too (and honours fare_class). Checking
+            # is_cross first would send "cheapest MS->NR" to the time-only
+            # query_interchange_path, silently dropping cost and fare_class.
+            if optimise_by == "cost":
                 result = query_cheapest_route(
                     origin_id=origin_id,
                     destination_id=destination_id,
                     network=network,
                     fare_class=fare_class,
                 )
+            elif is_cross:
+                result = query_interchange_path(origin_id, destination_id)
             else:
                 result = query_shortest_route(
                     origin_id=origin_id,
